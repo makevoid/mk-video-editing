@@ -1,4 +1,3 @@
-require "etc"
 require_relative "../workflow/approval"
 require_relative "../workflow/waves"
 require_relative "../workflow/journal"
@@ -19,7 +18,7 @@ module Toolkit
       "work:watch" => "Show recent worker log entries; LOG_DIR and LIMIT optional",
       "anim:render" => "Render a JSON scene to PNG frames: [scene.json,out,frames,width,height] (local)",
       "graphics:build" => "Build native Swift drawing/composition renderer (macOS 14+)",
-      "graphics:render" => "Native scene: [scene.json,out_dir_or_movie,frames,width,height,fps]; PLATE/AUDIO/CODEC/SUPERSAMPLE/BITRATE/GLOW (gpu default, cg)/JOBS (parallel chunks, default cores-2) optional",
+      "graphics:render" => "Native scene: [scene.json,out_dir_or_movie,frames,width,height,fps]; PLATE/AUDIO/CODEC/SUPERSAMPLE/BITRATE/GLOW (gpu default, cg)/JOBS (parallel chunks, default 1) optional",
       "graphics:preview" => "Fast draft for iterating: [scene.json,out.mp4,from_s,to_s] at 1x, 30 fps (FPS/SUPERSAMPLE/AUDIO/JOBS/WIDTH/HEIGHT/GLOW optional); finals use graphics:render",
       "graphics:benchmark" => "Measure native scene: [scene.json,frames,width,height,fps] (FROM first frame, SUPERSAMPLE), no files written",
       "audio:analyze" => "Beats and energy of a music track or any audio/video: [audio,out_dir] → beats.json, energy.json (local)",
@@ -42,7 +41,7 @@ module Toolkit
       "vfx:analyze" => "Analyze VFX source beats and cuts; VFX=name",
       "vfx:stills" => "Preview cued VFX frames [0,24,...]; VFX=name",
       "vfx:clip" => "Render VFX interval [from_frame,to_frame]; VFX=name",
-      "vfx:render" => "Render complete VFX version; VFX=name, JOBS parallel chunks (default cores-2)",
+      "vfx:render" => "Render complete VFX version; VFX=name, JOBS parallel chunks (default 1)",
       "sfx:gen" => "Synthesize/cache the sounds of an SFX cue sheet (synth:/tone: free; prompt: Stable Audio via Fal, paid); SFX=name",
       "sfx:mix" => "Mix cued SFX onto a rendered video (local); SFX=name",
       "test" => "Run RSpec suite; PROFILE=all|core|media|swift",
@@ -94,12 +93,12 @@ module Toolkit
         emit Media::Graphics.new.render(a[0], a[1], frames: Integer(a[2]), width: Integer(a[3] || 1920), height: Integer(a[4] || 1080), fps: Float(a[5] || 24),
           plate: ENV["PLATE"], audio: ENV["AUDIO"], codec: ENV["CODEC"], only: ENV["ONLY"]&.split(",")&.map { |v| Integer(v) },
           supersample: ENV["SUPERSAMPLE"]&.then { |v| Integer(v) }, bitrate: ENV["BITRATE"]&.then { |v| Integer(v) }, glow: ENV["GLOW"],
-          jobs: Integer(ENV["JOBS"] || [Etc.nprocessors - 2, 1].max.clamp(1, 8)))
+          jobs: Integer(ENV["JOBS"] || 1))
       when "graphics:preview"
         required(a, 4)
         emit Media::Graphics.new.preview(a[0], a[1], from: Float(a[2]), to: Float(a[3]), fps: Float(ENV["FPS"] || 30),
           width: Integer(ENV["WIDTH"] || 1920), height: Integer(ENV["HEIGHT"] || 1080), supersample: Integer(ENV["SUPERSAMPLE"] || 1), audio: ENV["AUDIO"], glow: ENV["GLOW"],
-          jobs: Integer(ENV["JOBS"] || [Etc.nprocessors - 2, 1].max.clamp(1, 8)))
+          jobs: Integer(ENV["JOBS"] || 1))
       when "graphics:benchmark"
         required(a, 2)
         emit Media::Graphics.new.render(a[0], "", frames: Integer(a[1]), width: Integer(a[2] || 1920), height: Integer(a[3] || 1080), fps: Float(a[4] || 24), benchmark: true,

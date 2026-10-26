@@ -1,11 +1,11 @@
 require "json"
 require "yaml"
-require "etc"
 require_relative "shell"
 require_relative "anim"
 require_relative "ffmpeg"
 require_relative "python"
 require_relative "graphics"
+require_relative "guard"
 
 module Media
   # Native Swift VFX: decode, light layers, effects, audio and encode in memory.
@@ -77,7 +77,7 @@ module Media
     # The whole video -> config `out` (the source's audio stream copied). jobs > 1 renders that many chunks in parallel mvfx
     # processes (each seeks to its start; echo ghosts are decoded from just before it), joins the pictures by stream copy and
     # copies the source's audio track whole, so chunk edges never touch the sound.
-    def render(jobs: Integer(ENV["JOBS"] || [Etc.nprocessors - 2, 1].max.clamp(1, 8)))
+    def render(jobs: Integer(ENV["JOBS"] || 1))
       cues
       ensure_built # once, before any parallel chunk could start a build
       raise CommandError, "Output already exists: #{out}" if File.exist?(out)
@@ -128,7 +128,7 @@ module Media
         raise ArgumentError, "lights must be a native .json scene" unless File.extname(config["lights"]) == ".json"
         args += ["--lights-scene", File.expand_path(config["lights"], ROOT)]
       end
-      JSON.parse(run(BIN, "--in", source, "--cues", path("cues.json"), *args.map(&:to_s), quiet: quiet).lines.last)
+      JSON.parse(Guard.run(BIN, "--in", source, "--cues", path("cues.json"), *args.map(&:to_s), quiet: quiet).lines.last)
     end
   end
 end

@@ -144,7 +144,7 @@ Other building blocks:
 
 ## Video, audio and performance
 
-- **Parallel renders:** `--from A --to B` renders one chunk (times stay absolute). Through Ruby, `JOBS=N` splits a movie into chunks, joins them by stream copy and muxes the audio once. Keep `JOBS` low on 16 GB machines (see the skill's memory-safety rules).
+- **Parallel renders:** `--from A --to B` renders one chunk (times stay absolute). Through Ruby, `JOBS=N` splits a movie into chunks, joins them by stream copy and muxes the audio once. The default is `JOBS=1`, and every native job uses the memory watchdog. Keep `JOBS=1` below 32 GB RAM (see the skill's memory-safety rules).
 - **Supersampling:** `--supersample N` (1–4) draws at N× and Lanczos-downscales, which costs about 2× the draw time at N=2. `--bitrate` sets the average H.264/HEVC bits/s.
 - **Transparency:** PNG and ProRes 4444 MOV keep alpha. H.264/HEVC are opaque and flatten over black when there is no plate. Output is SDR sRGB/Rec.709.
 - **Video in:** `VideoSource` streams with one-frame lookahead and honors orientation.

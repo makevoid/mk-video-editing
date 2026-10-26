@@ -19,8 +19,22 @@ module Toolkit
       raise ArgumentError, "init requires --project, --media (file or folder, repeatable), --prompt-file" unless project && !media.empty? && prompt
       raise ArgumentError, "Prompt file missing" unless File.file?(prompt)
       raise ArgumentError, "Project already initialized: #{project}" if File.exist?(File.join(project, "Rakefile"))
-      files = media.flat_map { |m| File.directory?(m) ? Dir[File.join(m, "*")].sort : [m] }.select { |f| File.file?(f) && f.match?(VIDEO) }
+      files = media.flat_map { |m| File.directory?(m) ? Dir[File.join(m, "*")].sort : [m] }
+                   .select { |f| File.file?(f) && f.match?(VIDEO) }.map { |f| File.expand_path(f) }.uniq
       raise ArgumentError, "No video files in #{media.join(", ")}" if files.empty?
+      # Validate before copying anything. macOS commonly uses a case-insensitive filesystem;
+      # include existing source entries so a different clip can never be silently reused.
+      source_dir = File.join(project, "source")
+      existing = File.directory?(source_dir) ? Dir.children(source_dir).map { |name| File.join(source_dir, name) } : []
+      names = existing.to_h { |path| [File.basename(path).unicode_normalize(:nfc).downcase, path] }
+      files.each do |f|
+        key = File.basename(f).unicode_normalize(:nfc).downcase
+        previous = names[key]
+        if previous && !File.identical?(previous, f)
+          raise ArgumentError, "Source filename collision: #{previous} and #{f}; give the clips unique filenames before init"
+        end
+        names[key] ||= f
+      end
       copy_tree(@runtime, project)
       copy_skill(project)
       %w[source audio analysis edit docs output scenes config].each { |d| FileUtils.mkdir_p(File.join(project, d)) }

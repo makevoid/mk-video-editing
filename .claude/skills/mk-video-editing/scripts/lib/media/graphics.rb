@@ -1,6 +1,7 @@
 require "json"
 require_relative "shell"
 require_relative "ffmpeg"
+require_relative "guard"
 
 module Media
   # Native Swift scene renderer. Used by the Anim entry point and direct movie exports.
@@ -16,7 +17,7 @@ module Media
     # jobs > 1 renders a movie as that many frame chunks in parallel mgraphics processes (each frame is a pure function of its
     # time, so chunks match a sequential render), joins them with a stream copy and muxes the audio once.
     def render(scene, out, width:, height:, fps:, frames:, data: {}, only: nil, plate: nil, audio: nil, codec: nil, benchmark: false, coverage: false,
-               supersample: nil, bitrate: nil, jobs: nil, from: 0, glow: nil)
+               supersample: nil, bitrate: nil, jobs: 1, from: 0, glow: nil)
       ensure_built
       argv = lambda do |movie, sound|
         args = [scene, "--out", movie, "--width", width, "--height", height, "--fps", fps, "--frames", frames]
@@ -35,12 +36,12 @@ module Media
       end
       chunks = jobs.to_i > 1 && out.match?(/\.(mp4|mov)\z/i) && !benchmark && !plate ? [jobs.to_i, (frames - from) / 24].min : 1
       return parallel(argv, out, frames: frames, fps: fps, audio: audio, chunks: chunks, from: from) if chunks > 1
-      JSON.parse(run(BIN, *argv.call(out, audio)).lines.last)
+      JSON.parse(Guard.run(BIN, *argv.call(out, audio)).lines.last)
     end
 
     # Fast draft of a time range for iterating: 1x (no supersampling), 30 fps, seconds from...to of the scene's clock (times stay
     # absolute; the soundtrack is cut to match). Finals use #render with SUPERSAMPLE=2 at the delivery frame rate.
-    def preview(scene, out, from:, to:, fps: 30, width: 1920, height: 1080, supersample: 1, audio: nil, jobs: nil, data: {}, glow: nil)
+    def preview(scene, out, from:, to:, fps: 30, width: 1920, height: 1080, supersample: 1, audio: nil, jobs: 1, data: {}, glow: nil)
       first, last = (from * fps).round, (to * fps).round
       raise ArgumentError, "preview needs 0 <= from < to" unless first >= 0 && last > first
       render(scene, out, width: width, height: height, fps: fps, frames: last, from: first, supersample: (supersample if supersample > 1),
@@ -50,7 +51,7 @@ module Media
     # Procedural sound effect (SoundSynth in Synth.swift) -> {"wav", "duration", "peak_at"}. spec: {"synth" => "whoosh", ...}.
     def synth(out, spec)
       ensure_built
-      JSON.parse(run(BIN, "--sfx", out, "--spec", JSON.generate(spec), quiet: true).lines.last)
+      JSON.parse(Guard.run(BIN, "--sfx", out, "--spec", JSON.generate(spec), quiet: true).lines.last)
     end
 
     private
@@ -64,8 +65,8 @@ module Media
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       warn "  rendering #{frames} frames as #{chunks} parallel chunks"
       files = bounds.each_cons(2).with_index.map do |(from, to), i|
-        file = File.join(parts, format("%03d.mp4", i))
-        thread = Thread.new { run(BIN, *argv.call(file, nil), "--from", from, "--to", to, quiet: true) }
+        file = File.join(parts, format("%03d%s", i, File.extname(out)))
+        thread = Thread.new { Guard.run(BIN, *argv.call(file, nil), "--from", from, "--to", to, quiet: true) }
         thread.report_on_exception = false
         [file, thread]
       end

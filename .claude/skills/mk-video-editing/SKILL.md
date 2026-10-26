@@ -34,7 +34,7 @@ Designed for Claude Code on macOS 14+ on Apple Silicon (Swift 5.9+, Ruby 3.2+, B
 4K/HDR hardware decode keeps frames in `VTDecoderXPCService`, outside the job's own footprint. On a 16 GB machine without swap, exhausting memory **freezes the computer** instead of slowing it down. Therefore:
 
 - Run **one heavy job at a time** (medit analyze/render/stills, mgraphics encodes, Demucs, big ffmpeg encodes). Never launch several in parallel or in background alongside each other; chain them sequentially in one background command if needed. `JOBS` stays 1 unless RAM ≥ 32 GB.
-- Every medit/mgraphics call goes through `Media::Guard` (automatic in `Media::Edit`): it samples job + decoder footprint and kernel free % every 0.3 s and SIGKILLs before `MEDIT_MAX_FOOTPRINT_MB` (default 3500) or below `MEDIT_MIN_FREE_PCT` (default 30). It refuses to start when free memory is already low.
+- Every medit/mgraphics/mvfx render call goes through `Media::Guard` (automatic in the Ruby services): it samples job + decoder footprint and kernel free % every 0.3 s and SIGKILLs before `MEDIT_MAX_FOOTPRINT_MB` (default 3500) or below `MEDIT_MIN_FREE_PCT` (default 30). It refuses to start when free memory is already low. All three renderers default to `JOBS=1`; parallel chunks require an explicit `JOBS` setting.
 - Validate any new decode/render code path on a **short range with tight limits first** (`TO=15 MEDIT_MAX_FOOTPRINT_MB=1500 MEDIT_GUARD_LOG=/path/log`), check the log is flat, then run full length.
 - In Swift media loops wrap each `copyNextSampleBuffer` and Core Image render in `autoreleasepool` (async code never drains the default pool: frames leak at ~1.5 GB/s).
 

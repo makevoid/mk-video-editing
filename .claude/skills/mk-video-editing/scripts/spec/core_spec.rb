@@ -49,6 +49,48 @@ RSpec.describe "Skill contracts and Ruby entry", :core do
     expect(out).to eq(dangerous)
     expect(File.exist?("SHOULD_NOT_EXIST")).to be(false)
   end
+
+  ["clip.mov", "CLIP.MOV"].each do |second_name|
+    it "rejects colliding source names (clip.mov and #{second_name}) before creating a project" do
+      sources = [file("camera_a/clip.mov"), file("camera_b/#{second_name}")]
+      sources.each_with_index { |path, i| FileUtils.mkdir_p(File.dirname(path)); File.write(path, "camera #{i}") }
+      File.write(file("brief.md"), "Edit both cameras")
+      project = file("collision")
+      _, err, status = cli("init", "--project", project, "--media", sources[0], "--media", sources[1], "--prompt-file", file("brief.md"))
+      expect(status.exitstatus).to eq(2)
+      expect(err).to include("Source filename collision", *sources)
+      expect(File.exist?(project)).to be(false)
+      expect(sources.map { |path| File.read(path) }).to eq(["camera 0", "camera 1"])
+    end
+  end
+
+  it "rejects an existing different source before copying the runtime or replacing project files" do
+    project = file("existing")
+    FileUtils.mkdir_p(File.join(project, "source"))
+    File.write(File.join(project, "source/clip.mov"), "existing footage")
+    File.write(File.join(project, "Gemfile"), "existing project file")
+    File.write(file("clip.mov"), "incoming footage")
+    File.write(file("brief.md"), "Edit the clip")
+    _, err, status = cli("init", "--project", project, "--media", file("clip.mov"), "--prompt-file", file("brief.md"))
+    expect(status.exitstatus).to eq(2)
+    expect(err).to include("Source filename collision")
+    expect(File.read(File.join(project, "source/clip.mov"))).to eq("existing footage")
+    expect(File.read(File.join(project, "Gemfile"))).to eq("existing project file")
+    expect(File.exist?(File.join(project, "Rakefile"))).to be(false)
+  end
+
+  it "accepts footage already in source and deduplicates repeated inputs" do
+    project = file("existing")
+    source = File.join(project, "source/clip.mov")
+    FileUtils.mkdir_p(File.dirname(source))
+    File.write(source, "original footage")
+    File.write(file("brief.md"), "Edit the clip")
+    out, err, status = cli("init", "--project", project, "--media", File.dirname(source), "--media", source, "--prompt-file", file("brief.md"))
+    expect(status.success?).to be(true), err
+    expect(JSON.parse(out)["sources"]).to eq(["source/clip.mov"])
+    expect(File.symlink?(source)).to be(false)
+    expect(File.read(source)).to eq("original footage")
+  end
   it "surfaces a backend failure" do
     expect { Media::Shell.new.run(RbConfig.ruby, "-e", "STDERR.puts 'fixture failure'; exit 9", quiet: true) }.to raise_error(Media::CommandError, /fixture failure/)
   end

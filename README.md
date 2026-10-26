@@ -97,6 +97,9 @@ sources, analysis, the EDL generator `edit/build_edl.rb`, docs (`BRIEF.md`, `PLA
 original media is never copied or modified. Revisions are new versions (`final_v2.mp4`, `final_v3.mp4`…); delivered
 masters are never overwritten.
 
+Source filenames must be unique, including case differences. If two cameras produced the same filename, rename the
+clips before importing; `init` reports the conflicting paths and leaves the project untouched.
+
 ### Running the tools directly
 
 Everything goes through one Ruby entry point:
