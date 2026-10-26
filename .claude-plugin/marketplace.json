@@ -9,7 +9,7 @@
     {
       "name": "mk-video-editing",
       "source": "./",
-      "description": "Edit talks, keynotes, interviews and event footage on macOS with native Swift tools and local transcription."
+      "description": "Edit talks, vlogs, interviews, podcasts, tutorials, product demos and event footage on macOS with native Swift tools and local transcription."
     }
   ]
 }

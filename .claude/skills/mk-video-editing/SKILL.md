@@ -1,6 +1,6 @@
 ---
 name: mk-video-editing
-description: Edit supplied camera/phone footage into a finished video — talks, keynotes, interviews, events — with transcript-driven selects, a stabilized virtual camera that tracks and reframes the speaker (wides, punch-ins, pushes, pans) over wide 4K shots, HDR→SDR, deflicker, per-clip color matching, dialogue cleanup and loudness, narration, native Swift motion-graphics titles, and optional music beds, sound effects and picture effects. Use when the user supplies video files to cut, reframe, grade, fix or title; not for generating footage.
+description: Edit supplied camera/phone footage into a finished video — talks and presentations, vlogs, interviews and podcasts, tutorials, product demos, event recaps — with transcript-driven selects, a stabilized virtual camera that tracks and reframes the speaker (wides, punch-ins, pushes, pans) over wide 4K shots, HDR→SDR, deflicker, per-clip color matching, dialogue cleanup and loudness, narration, native Swift motion-graphics titles, and optional music beds, sound effects and picture effects. Use when the user supplies video files to cut, reframe, grade, fix or title; not for generating footage.
 license: MIT
 ---
 

@@ -1,7 +1,8 @@
 # mk-video-editing
 
-**Turn raw talk, keynote, interview and event footage into a finished video by describing the edit to
-[Claude Code](https://claude.com/claude-code).**
+**Turn raw camera or phone footage into a finished video by describing the edit to
+[Claude Code](https://claude.com/claude-code)** — talks and presentations, vlogs, interviews and podcasts, tutorials
+and product demos, event recaps.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-black)
@@ -13,9 +14,10 @@
 > talk title and speaker; a lower third when they first appear. Clean up the audio, remove the ums and long pauses, and
 > keep the camera off the audience on the left.
 
-Claude transcribes the footage, picks selects at sentence boundaries, shows you a plan, then builds and renders the
-edit with native macOS tools — a tracking virtual camera inside wide 4K shots, HDR→SDR, deflicker, color matching,
-dialogue cleanup and Swift motion-graphics titles.
+It works best on footage where people talk, since the edit is driven by the transcript. Claude transcribes the
+footage, picks selects at sentence boundaries, shows you a plan, then builds and renders the edit with native macOS
+tools — a tracking virtual camera inside wide 4K shots, HDR→SDR, deflicker, color matching, dialogue cleanup and Swift
+motion-graphics titles.
 
 - **Local by default** — transcription, analysis, audio and rendering run on your Mac; footage never leaves it.
 - **Non-destructive** — sources are symlinked, never copied or modified; every revision is a new `final_vN.mp4`.

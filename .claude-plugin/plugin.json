@@ -2,7 +2,7 @@
   "name": "mk-video-editing",
   "version": "0.1.0",
   "license": "MIT",
-  "description": "Edit camera and phone footage into finished videos on macOS: transcript-driven selects, a tracking virtual camera, HDR to SDR, deflicker, color matching, dialogue cleanup and native Swift titles.",
+  "description": "Edit camera and phone footage into finished videos on macOS (talks, vlogs, interviews, podcasts, tutorials, product demos, events): transcript-driven selects, a tracking virtual camera, HDR to SDR, deflicker, color matching, dialogue cleanup and native Swift titles.",
   "author": {
     "name": "makevoid",
     "url": "https://github.com/makevoid"
