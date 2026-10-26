@@ -18,24 +18,29 @@ RSpec.describe "Skill contracts and Ruby entry", :core do
     expect(out).to include("--project", "Exit:")
     out, err, status = cli("-T")
     expect(status.exitstatus).to eq(0), err
-    expect(out).to include("graphics:preview", "graphics:render", "media:mouth", "vfx:render", "edit:analyze", "edit:render", "speech:mix", "speech:flow", "test")
+    expect(out).to include("graphics:preview", "graphics:render", "vfx:render", "edit:analyze", "edit:render", "speech:mix", "speech:flow", "test")
   end
   it "rejects incomplete intake without prompting or overwriting an existing project" do
     _, _, status = cli("init")
     expect(status.exitstatus).to eq(2)
-    File.write(file("song.wav"), "fixture"); File.write(file("brief.md"), "Dancing robot")
+    File.write(file("talk.mov"), "fixture"); File.write(file("brief.md"), "Cut the keynote")
     dir = file("project")
-    out, err, status = cli("init", "--project", dir, "--song", file("song.wav"), "--prompt-file", file("brief.md"))
+    out, err, status = cli("init", "--project", dir, "--media", file("talk.mov"), "--prompt-file", file("brief.md"))
     expect(status.exitstatus).to eq(0), err
     expect(JSON.parse(out)["project"]).to eq(dir)
-    expect(File.read(File.join(dir, "docs/BRIEF.md"))).to eq("Dancing robot")
+    expect(File.read(File.join(dir, "docs/BRIEF.md"))).to eq("Cut the keynote")
     out, err, status = cli("--project", dir, "-T")
     expect(status.exitstatus).to eq(0), err
-    expect(out).to include("graphics:preview", "audio:map", "sfx:gen")
+    expect(out).to include("edit:render", "graphics:preview", "sfx:gen", "voice:tts", "music:score")
+    %w[audio:map gen:music pipeline:all media:cutout anim:overlay].each do |removed|
+      _, err, status = cli("--project", dir, removed)
+      expect(status.success?).to be(false), "#{removed} unexpectedly ran"
+      expect(err).to include("Don't know how to build task")
+    end
     _, err, status = cli("--project", dir, "gen:ref_base")
     expect(status.success?).to be(false)
     expect(err).to include("Don't know how to build task")
-    _, _, status = cli("init", "--project", dir, "--song", file("song.wav"), "--prompt-file", file("brief.md"))
+    _, _, status = cli("init", "--project", dir, "--media", file("talk.mov"), "--prompt-file", file("brief.md"))
     expect(status.exitstatus).to eq(2)
   end
   it "executes shell arguments literally, including spaces and shell metacharacters" do
@@ -101,13 +106,6 @@ RSpec.describe "Skill contracts and Ruby entry", :core do
       json("config/production.json", jobs: [{id: "a", depends: ["b"]}, {id: "b", depends: ["a"]}])
       expect { Workflow::Waves.new.next! }.to raise_error(/No jobs ready/)
     end
-  end
-  it "refuses noncontiguous section assembly before touching media" do
-    stub_const("Pipeline::GENERATIONS", {
-      "test-a" => {steps: [], **Pipeline.section(0, 24)},
-      "test-b" => {steps: [], **Pipeline.section(25, 24)}
-    })
-    expect { Toolkit::Operations.new.preview(file("out.mp4"), %w[test-a test-b]) }.to raise_error(/Noncontiguous/)
   end
 end
 

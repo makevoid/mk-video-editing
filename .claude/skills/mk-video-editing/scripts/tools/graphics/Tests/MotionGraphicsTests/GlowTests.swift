@@ -39,18 +39,18 @@ final class GlowTests: XCTestCase {
             XCTAssertGreaterThan(row(r,y:100,channel:1,stride(from:190,to:191,by:1))[0],30)          // the uncovered side still glows
         }
     }
-    func testGPUCanvasMatchesCoreGraphicsForGroupOpacityAndShaders() throws {
+    func testGPUCanvasMatchesCoreGraphicsForGroupOpacityAndTransforms() throws {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("glow-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at:url) }
-        // A nebula under a half-transparent group of overlapping shapes, a translucent leaf shader and a rotated, scaled one.
+        // A gradient plate under a half-transparent group of overlapping shapes, a translucent disc and a rotated, scaled card.
         try Data("""
         {"background":"#101018","nodes":[
-          {"type":"shader","shader":"nebula","width":400,"height":200,"seed":2,"stars":0.5},
+          {"type":"rect","width":400,"height":200,"gradient":{"colors":["#1B2A6B","#7A2E8E"],"from":[0,0],"to":[400,200]}},
           {"type":"group","opacity":0.5,"x":40,"y":30,"children":[{"type":"rect","width":120,"height":80,"fill":"#FF5A1F"},
                                                                   {"type":"rect","x":60,"y":40,"width":120,"height":80,"fill":"#2EE6FF"}]},
-          {"type":"shader","shader":"starfield","x":220,"y":20,"width":160,"height":160,"opacity":0.6,"stars":1,"seed":5},
-          {"type":"group","x":300,"y":150,"rotation":0.4,"scaleX":0.5,"scaleY":0.5,"children":[{"type":"shader","shader":"nebula","width":120,"height":90,"seed":7}]},
+          {"type":"circle","x":300,"y":100,"radius":60,"opacity":0.6,"fill":"#FFD23F"},
+          {"type":"group","x":300,"y":150,"rotation":0.4,"scaleX":0.5,"scaleY":0.5,"children":[{"type":"rect","width":120,"height":90,"radius":12,"fill":"#FFFFFF"}]},
           {"type":"rect","x":0,"y":170,"width":400,"height":30,"fill":"#000000"}]}
         """.utf8).write(to:url)
         let doc = try SceneDocument(url:url,width:400,height:200)
@@ -60,6 +60,6 @@ final class GlowTests: XCTestCase {
         for i in 0..<cg.bytes.count { let d = abs(Int(cg.bytes[i])-Int(gpu.bytes[i])); worst = max(worst,d); total += d }
         XCTAssertLessThan(Double(total)/Double(cg.bytes.count),0.6)   // the same picture ...
         XCTAssertLessThan(worst,40)                                   // ... up to resampling at a few edge pixels
-        XCTAssertEqual(row(gpu,y:185,channel:0,stride(from:10,to:400,by:40)).max()!,0)   // the later black bar covers the shader
+        XCTAssertEqual(row(gpu,y:185,channel:0,stride(from:10,to:400,by:40)).max()!,0)   // the later black bar covers the disc
     }
 }

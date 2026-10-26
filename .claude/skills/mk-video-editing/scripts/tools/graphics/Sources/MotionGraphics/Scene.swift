@@ -150,7 +150,7 @@ public final class ImageNode: Node {
     public override func contentBounds(at time: FrameTime) -> CGRect? { rect }
     public override var paintsOnce: Bool { children.isEmpty }
 }
-/// Bounded LRU avoids loading an entire music video's sprite sequence into memory.
+/// Bounded LRU avoids loading a whole image sequence into memory.
 public final class SpriteSequence: Node {
     public let directory: URL, count: Int, sourceFPS: Double, cacheLimit: Int
     public var loop = false, audioAt = 0.0

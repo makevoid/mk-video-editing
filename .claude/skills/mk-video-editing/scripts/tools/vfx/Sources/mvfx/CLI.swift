@@ -79,7 +79,6 @@ struct Options {
                 if let custom, let canvas {
                     try custom.scene.draw(on:canvas,at:time)
                     var overlay = CIImage(cgImage:try canvas.snapshot())
-                    for particles in custom.particles { overlay = compositor.composite(try particles.render(at:time.seconds),over:overlay) }
                     overlay = try custom.effects.apply(overlay,at:time)
                     light = light.map { compositor.composite(overlay,over:$0,mode:.screen) } ?? overlay
                 }

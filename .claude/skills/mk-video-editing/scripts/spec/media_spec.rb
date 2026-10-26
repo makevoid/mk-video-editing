@@ -1,12 +1,13 @@
 require_relative "spec_helper"
 RSpec.describe "Local media end to end", :media do
-  it "executes the documented intake and audio-analysis task in a fresh project" do
-    song = tone(duration: 3)
-    File.write(file("brief.md"), "A robot band, visual puns and dramatic drop")
+  it "initializes a footage project and runs a task on the linked source" do
+    clip = video(audio: tone(duration: 3), seconds: 3)
+    File.write(file("brief.md"), "Cut the talk down to the best five minutes")
     destination = file("new project")
-    _, err, status = cli("init", "--project", destination, "--song", song, "--prompt-file", file("brief.md"))
+    _, err, status = cli("init", "--project", destination, "--media", clip, "--prompt-file", file("brief.md"))
     expect(status.exitstatus).to eq(0), err
-    out, err, status = cli("--project", destination, "audio:analyze[audio/source.wav,audio]")
+    expect(File.symlink?(File.join(destination, "source/clip.mp4"))).to be(true)
+    out, err, status = cli("--project", destination, "audio:analyze[source/clip.mp4,audio]")
     expect(status.exitstatus).to eq(0), err
     expect(JSON.parse(out)["duration"]).to be_within(0.01).of(3)
     expect(File.file?(File.join(destination,"tools/python/beats.py"))).to be(true)
@@ -15,10 +16,10 @@ RSpec.describe "Local media end to end", :media do
     expect(File.directory?(File.join(destination,"tools/vfx/.build"))).to be(false)
   end
   it "renders typography, timing and graphics helpers without bundled font files" do
-    result = Media::Anim.new.render(File.join(RT,"tools/graphics/examples/futuristic.json"), file("smoke"), width: 1920, height: 1080, fps: 24, frames: 48, only: [0,24,47])
+    result = Media::Anim.new.render(File.join(RT,"tools/graphics/examples/opening_title.json"), file("smoke"), width: 1920, height: 1080, fps: 24, frames: 120, only: [0,24,119])
     expect(result["frames"]).to eq(3)
-    expect(magick.alpha_coverage(file("smoke/0024.png"))).to be > 0.03
-    expect(File.binread(file("smoke/0000.png"))).not_to eq(File.binread(file("smoke/0047.png")))
+    expect(magick.alpha_coverage(file("smoke/0119.png"))).to be > 0.01
+    expect(File.binread(file("smoke/0000.png"))).not_to eq(File.binread(file("smoke/0119.png")))
   end
   it "detects audio duration, a real silent tail and vocal-band energy through Python" do
     song = tone(duration: 4)
@@ -35,52 +36,6 @@ RSpec.describe "Local media end to end", :media do
     data = py.call("cuts.py", file("cuts.mp4"))
     expect(data["cuts"].map { |c| c["f"] }).to include(24)
     expect(data["frames"]).to eq(48)
-  end
-  it "cuts out green, preserves the character and renders it at the intended native position" do
-    meta = py.cutout(character, file("sprite"), "green")
-    rgba = pixels(file("sprite/0000.png"))
-    expect(rgba[0][3]).to eq(0)
-    expect(rgba[90 * 320 + 160][3]).to be > 250
-    meta["dir"] = file("sprite").delete_prefix("#{RT}/")
-    json(file("clips.json"), hero: meta)
-    native_scene(file("scene.json"), clip: "hero", background: "#102030", speed: 48, x: 8)
-    renderer = Media::Anim.new
-    renderer.render(file("scene.json"), file("frames"), width: 320, height: 180, fps: 24, frames: 24, data: {clips: file("clips.json")})
-    png = pixels(file("frames/0000.png"))
-    red = png.each_index.select { |i| r,g,b,_ = png[i]; r > 170 && g < 90 && b < 110 }
-    xs = red.map { |i| i % 320 }; ys = red.map { |i| i / 320 }
-    expect(xs.min).to be_within(3).of(208)
-    expect(xs.max).to be_within(3).of(272)
-    expect(ys.min).to be_within(3).of(36)
-    expect(ys.max).to be_within(3).of(144)
-    expect(Digest::SHA256.file(file("frames/0000.png")).hexdigest).not_to eq(Digest::SHA256.file(file("frames/0023.png")).hexdigest)
-    renderer.render(file("scene.json"), file("repeat"), width: 320, height: 180, fps: 24, frames: 24, only: [0], data: {clips: file("clips.json")})
-    expect(File.binread(file("repeat/0000.png"))).to eq(File.binread(file("frames/0000.png")))
-    base = video(seconds: 1)
-    ff.overlay_frames(base, file("frames"), file("scene.mp4"), fps: 24)
-    info = ff.summary(file("scene.mp4"))
-    expect(info.dig(:video, :frames)).to eq(24)
-    expect(info.dig(:audio, :codec)).to eq("aac")
-  end
-  it "assembles contiguous sections without losing frames or the original soundtrack timing" do
-    song = tone(duration: 2)
-    runs = %w[e2e-join-a e2e-join-b]
-    generations = runs.each_with_index.to_h { |name, i| [name, {steps: [], **Pipeline.section(i * 24, 24), music_from: song}] }
-    stub_const("Pipeline::GENERATIONS", generations)
-    runs.each do |run|
-      project = Pipeline::Project.new(run)
-      video(project.path("final_overlay.mp4"), audio: song, seconds: 1)
-    end
-    Toolkit::Operations.new.preview(file("joined.mp4"), runs)
-    info = ff.summary(file("joined.mp4"))
-    expect(info.dig(:video, :frames)).to eq(48)
-    expect(info[:duration]).to be_within(0.06).of(2)
-    original = ff.run("ffmpeg", "-v", "error", "-i", song, "-ac", "1", "-f", "s16le", "-", quiet: true).unpack("s<*")
-    joined = ff.run("ffmpeg", "-v", "error", "-i", file("joined.mp4"), "-ac", "1", "-ar", "44100", "-f", "s16le", "-", quiet: true).unpack("s<*")
-    size = [original.size, joined.size].min
-    dot = original.take(size).zip(joined).sum { |x,y| x * y }
-    norm = Math.sqrt(original.take(size).sum { |x| x*x } * joined.take(size).sum { |x| x*x })
-    expect(dot / norm).to be > 0.98
   end
   it "mixes a timed sound effect, limits peaks and keeps the video frames" do
     source = video(seconds: 2)

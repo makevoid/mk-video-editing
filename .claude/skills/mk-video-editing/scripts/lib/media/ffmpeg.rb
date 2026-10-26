@@ -56,7 +56,7 @@ module Media
       out
     end
 
-    # Close-up crop sequence of a region (e.g. the mouth) for lipsync review.
+    # Close-up crop sequence of a region (e.g. a face or a slide) as one review image.
     def crop_strip(video, out, crop:, fps: 4, cols: 10, rows: 4)
       FileUtils.mkdir_p(File.dirname(out))
       run("ffmpeg", "-y", "-v", "error", "-i", video,

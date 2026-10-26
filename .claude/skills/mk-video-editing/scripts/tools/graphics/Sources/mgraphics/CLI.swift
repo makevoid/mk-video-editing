@@ -54,44 +54,24 @@ struct Options {
               --only 0,24,48             Sparse PNG previews (absolute frame numbers)
               --data words=words.json   External cue/sample/clip data; repeatable
               --plate video.mp4         Decode and compose over a video (center-cropped to fill)
-              --audio song.m4a          Mux audio; otherwise inherit plate audio if present
+              --audio audio.m4a         Mux audio; otherwise inherit plate audio if present
               --codec h264|hevc|prores4444  ProRes 4444 .mov preserves alpha; MP4 flattens over black
               --supersample 2           Draw at 2x (or 3, 4) and Lanczos-downscale: cleaner thin lines, glows and small type
-              --glow gpu|cg             GPU: neon halos blurred once per frame, shaders blended on the GPU (default); cg: Core Graphics shadows
+              --glow gpu|cg             GPU: neon halos blurred once per frame (default); cg: Core Graphics shadows
               --bitrate 15000000        Average H.264/HEVC bits/s (default 0.18 bit/pixel/frame)
               --from 0 --to N           Render only frames from..<to (a chunk; times stay absolute) — for parallel renders
               --benchmark              Render without writing; reports wall time and fps
-              --software               Force software Core Image (Metal particles still require GPU)
-              --analyze audio.wav --out features.json [--fps 24]  Native RMS/peak/spectrum analysis
+              --software               Force software Core Image
               --sfx out.wav --spec '{"synth":"whoosh","duration":0.8}'  Procedural sound effect (see SoundSynth)
             Times are seconds; angles radians; coordinates top-left pixels. No network access.
             """); return
         }
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            if args.first == "--analyze" { try analyze(args) }
-            else if args.first == "--sfx" { try sfx(args) }
+            if args.first == "--sfx" { try sfx(args) }
             else { try await run(Options(args)) }
         }
         catch { FileHandle.standardError.write(Data("mgraphics: \(error)\n".utf8)); exit(1) }
-    }
-    static func analyze(_ args: [String]) throws {
-        guard args.count >= 4 else { throw GraphicsError.invalid("--analyze audio.wav --out features.json [--fps 24]") }
-        let audio = args[1]; var output: String?, fps = 24.0, i = 2
-        while i < args.count {
-            guard i+1 < args.count else { throw GraphicsError.invalid("Missing analysis argument") }
-            switch args[i] {
-            case "--out": output = args[i+1]
-            case "--fps": guard let value = Double(args[i+1]) else { throw GraphicsError.invalid("Invalid analysis fps") }; fps = value
-            default: throw GraphicsError.invalid("Unknown analysis argument")
-            }; i += 2
-        }
-        guard let output else { throw GraphicsError.invalid("Analysis requires --out") }
-        let result = try AudioAnalyzer().analyze(url:URL(fileURLWithPath:audio),fps:fps)
-        let out = URL(fileURLWithPath:output)
-        try FileManager.default.createDirectory(at:out.deletingLastPathComponent(),withIntermediateDirectories:true)
-        try JSONEncoder().encode(result).write(to:out,options:.atomic)
-        print(String(data:try JSONSerialization.data(withJSONObject:["out":output,"frames":result.rms.count,"fps":fps]),encoding:.utf8)!)
     }
     static func sfx(_ args: [String]) throws {
         guard args.count == 4, args[2] == "--spec" else { throw GraphicsError.invalid("--sfx out.wav --spec '{\"synth\":\"whoosh\"}'") }
@@ -143,7 +123,6 @@ struct Options {
                     // Halos blend in sRGB, as the Core Graphics shadows did.
                     image = glow.composited(over:srgb).matchedToWorkingSpace(from:Color.space) ?? image
                 }
-                for particles in document.particles { image = compositor.composite(try particles.render(at:time.seconds),over:image) }
                 image = try document.effects.apply(image,at:time)
                 if let review = reviewCanvas, frame % 6 == 0 {
                     // Review-only readback, sampled in memory; never writes a frame sequence.

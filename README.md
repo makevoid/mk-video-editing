@@ -13,6 +13,7 @@ No footage, music or fonts are bundled: you bring the media, and fonts are copie
 
 [Skill instructions](.claude/skills/mk-video-editing/SKILL.md) ·
 [Footage editing reference](.claude/skills/mk-video-editing/references/footage-editing.md) ·
+[Finishing: music, SFX, VFX](.claude/skills/mk-video-editing/references/finishing.md) ·
 [Task reference](.claude/skills/mk-video-editing/references/tasks.md) ·
 [Testing](.claude/skills/mk-video-editing/references/testing.md)
 
@@ -25,7 +26,8 @@ No footage, music or fonts are bundled: you bring the media, and fonts are copie
 | **Virtual camera** | Vision-tracked speaker; wides, medium shots, punch-ins, slow pushes and pans written as camera beats; each jump cut opens on a contrasting framing; zooms never faster than 4.5 s; `safe` areas keep foreground heads out of frame |
 | **Picture** | HLG/HDR → Rec.709 tone mapping, per-tile deflicker of LED/mains ripple, per-clip exposure/white-balance match, one shared look; optional stabilization (off for phone footage that the camera already stabilized) |
 | **Audio** | Dialogue cleanup (rumble, denoise, de-ess, leveler, optional Demucs isolation), timeline mix with crossfades and ducking, two-pass loudness to −16 LUFS / −1.5 dBTP, optional ElevenLabs narration and music bed |
-| **Graphics** | Native Swift motion-graphics renderer (`mgraphics`) for opening titles, lower thirds and end cards, rendered as ProRes 4444 alpha overlays |
+| **Graphics** | Native Swift motion-graphics renderer (`mgraphics`) for opening titles, lower thirds and end cards, rendered as ProRes 4444 alpha overlays; editable JSON templates included |
+| **Finishing** | Optional music bed (supplied or ElevenLabs Music, beat analysis for timing), procedural sound effects (whoosh, riser, impact, tick…), Core Image / Metal picture effects (flash, dip, punch, glow, lens, streaks) |
 | **Review** | Debug stills with crop/subject/safe-area overlays, contact sheets, half-res previews, QA re-transcription of the mix and the final render |
 | **Delivery** | H.264/HEVC masters, X/Twitter and YouTube upload encodes |
 
@@ -128,6 +130,8 @@ $MV --project . 'edit:render[edit/edl.json,output/final_v1.mp4]'
 | `speech:flow` | Filler / false start / repeat / pause detector with proposed cuts and a readable `.txt` |
 | `speech:clean`, `speech:mix`, `speech:measure` | Dialogue cleanup, timeline mix + loudness, measurements |
 | `voice:tts`, `music:score` | Narration line, music bed (paid, only on explicit request) |
+| `graphics:render`, `graphics:preview` | Titles from JSON scenes (ProRes 4444 alpha), fast drafts |
+| `sfx:gen`/`sfx:mix`, `vfx:stills`/`vfx:render` | Sound effects and picture effects from cue sheets |
 | `edit:stills`, `edit:sheet`, `edit:preview` | Review stills, contact sheets, half-res drafts |
 | `edit:render` | Final render of an EDL |
 | `media:twitter`, `media:youtube` | Upload encodes |
@@ -150,23 +154,24 @@ sources peaks around 2–2.5 GB. Close memory-hungry apps before long renders.
 .claude-plugin/             plugin.json + marketplace.json (Claude Code plugin install)
 .claude/skills/mk-video-editing/
   SKILL.md                  instructions Claude follows
-  references/               footage editing reference, motion-graphics cookbook, testing, credentials
-  assets/                   plan and scene templates
+  references/               footage editing, finishing (music/SFX/VFX), tasks, testing, credentials
   scripts/mv.rb             Ruby CLI entry point (rake tasks)
   scripts/mcp.rb            MCP server for paid Fal tasks in plugin sessions
-  scripts/lib/media/        Ruby services: edit, speech, cuts, guard, ffmpeg, graphics
+  scripts/lib/media/        Ruby services: edit, speech, cuts, guard, ffmpeg, graphics, sfx, vfx
+  scripts/lib/fal/          Fal client + ElevenLabs TTS/Music and Stable Audio SFX adapters
+  scripts/lib/workflow/     plan approval, dependency waves for parallel sub-agents, progress journal
   scripts/tools/edit/       medit — Swift footage editor (analysis, virtual camera, deflicker, grade, render)
-  scripts/tools/graphics/   mgraphics — Swift motion-graphics renderer
+  scripts/tools/graphics/   mgraphics — Swift motion-graphics renderer, title templates in examples/
   scripts/tools/vfx/        mvfx — Swift video effects
-  scripts/tools/python/     speech_flow, local transcription, audio helpers
+  scripts/tools/python/     speech flow, local transcription, Demucs stems, beats/energy, cut detection, SFX mix
   scripts/spec/             RSpec suite
 Brewfile                    command-line prerequisites
 Rakefile                    rake setup / doctor / test
 ```
 
-The motion-graphics renderer, VFX and music-mapping tools come from
-[motion-graphics-music-video-skill-noimage](https://github.com/makevoid/motion-graphics-music-video-skill-noimage); its
-beat-synced music-video workflow is still available here when you explicitly ask for a motion-graphics piece.
+The motion-graphics renderer and VFX come from
+[motion-graphics-music-video-skill-noimage](https://github.com/makevoid/motion-graphics-music-video-skill-noimage),
+trimmed to what footage editing uses. Use that skill for beat-synced music videos.
 
 ## Development and tests
 
@@ -191,8 +196,8 @@ and, for Swift changes, the swift profile before opening a pull request.
 
 Transcription, analysis, editing, audio processing and rendering run locally; your footage never leaves the Mac by
 default. Setup downloads gems and Python packages (the Swift tools have no third-party dependencies); the first transcription or Demucs run
-downloads model weights. Explicitly requested Fal tasks (narration, music, cloud transcription or stems) send their text
-or audio to Fal and may incur charges; Fal media URLs may be accessible to anyone with the link. There is no telemetry.
+downloads model weights. Explicitly requested Fal tasks (narration, music bed, prompt-based sound effects) send their text
+prompts to Fal and incur charges. There is no telemetry.
 Normal Claude conversation and tool-result handling still applies.
 
 ## License

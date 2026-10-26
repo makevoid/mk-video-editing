@@ -51,11 +51,11 @@ RSpec.describe "Fal audio HTTP and model contracts", :core do
   end
   it "validates endpoint inputs against a saved schema before submission" do
     with_workspace do
-      path = Fal::OpenAPI.spec_path(Fal::Models::Music3.endpoint)
-      json(path, components: {schemas: {Input: {required: ["prompt"], properties: {prompt: {type: "string"}, duration: {enum: [5]}}}}})
+      path = Fal::OpenAPI.spec_path(Fal::Models::ElevenMusic.endpoint)
+      json(path, components: {schemas: {Input: {required: ["prompt"], properties: {prompt: {type: "string"}, music_length_ms: {type: "integer", minimum: 3000}}}}})
       client = double("no network")
       expect(client).not_to receive(:run)
-      expect { Fal::Models::Music3.new(client: client).compose(prompt: "x", lyrics: "hello", duration: "bad") }.to raise_error(ArgumentError)
+      expect { Fal::Models::ElevenMusic.new(client: client).compose(prompt: "x", seconds: 1) }.to raise_error(ArgumentError)
     end
   end
   it "surfaces terminal queue errors and never calls a paid endpoint before approval" do

@@ -1,0 +1,11 @@
+{
+  "version":1,
+  "nodes":[
+    {"type":"group","name":"lower","tracks":{"opacity":[[0,0],[0.5,1,"outCubic"],[5.4,1],[6.0,0,"inCubic"]],"x":[[0,-30],[0.7,0,"outCubic"]]},"children":[
+      {"type":"rect","x":120,"y":858,"width":470,"height":116,"radius":3,"fill":"#00000052"},
+      {"type":"rect","x":120,"y":868,"width":4,"height":96,"fill":"#50AF95"},
+      {"type":"text","x":146,"y":912,"text":"Speaker Name","font":"AvenirNext-DemiBold","size":46,"fill":"#ffffff","reveal":[[0.2,0],[0.9,1,"outCubic"]]},
+      {"type":"text","x":148,"y":952,"text":"ROLE, ORGANIZATION","font":"AvenirNext-Medium","size":24,"tracking":5,"fill":"#50AF95","tracks":{"opacity":[[0.6,0],[1.1,1]]}}
+    ]}
+  ]
+}

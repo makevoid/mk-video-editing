@@ -21,7 +21,7 @@ public struct Style {
 }
 
 /// Native Quartz raster drawing. Bitmap CGContext is CPU rasterization, not Metal.
-/// The surface and caches are retained across frames; use MetalParticles for large fields.
+/// The surface and caches are retained across frames.
 public final class Canvas {
     public let width: Int, height: Int, context: CGContext
     public var style = Style()

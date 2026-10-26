@@ -180,59 +180,20 @@ final class GraphicsTests: XCTestCase {
             try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
         }
     }
-    func testPlaneProjectionForeshortensClipsAndComposes() throws {
-        let p = Projection(base:.identity,pivot:.zero,rx:1,ry:0)
-        let (top,ts) = p.project(local:CGPoint(x:100,y:-100))!, (bottom,bs) = p.project(local:CGPoint(x:100,y:100))!
-        XCTAssertLessThan(ts,1); XCTAssertGreaterThan(bs,1); XCTAssertLessThan(top.x,100); XCTAssertGreaterThan(bottom.x,100)
-        XCTAssertNil(Projection(base:.identity,pivot:.zero,rx:0,ry:0,tz:-1340).project(local:.zero))
-        let nested = Projection(base:.identity,pivot:.zero,rx:0,ry:0.5,outer:p)
-        XCTAssertNotEqual(nested.map(device:CGPoint(x:50,y:-50))!.0,p.map(device:CGPoint(x:50,y:-50))!.0)
-        // A 160px square tipped back: the far (top) edge narrows inside x=20, the near (bottom) edge widens past it.
-        let scene = Scene(), plane = PlaneNode(); plane.position = CGPoint(x:100,y:100); plane.anchor = CGPoint(x:100,y:100); plane.rotationX = 1
-        try plane.add(ShapeNode(.rect(CGRect(x:20,y:20,width:160,height:160)))); try scene.root.add(plane)
-        let c = try Canvas(width:200,height:200); try scene.draw(on:c,at:FrameTime(frame:0,fps:24))
-        XCTAssertEqual(pixel(c,18,140)[3],255); XCTAssertEqual(pixel(c,18,65)[3],0)
-        XCTAssertEqual(pixel(c,100,40)[3],0); XCTAssertEqual(pixel(c,100,100)[3],255)
-    }
-    func testFloorRunningBehindTheCameraIsClippedNotDropped() throws {
-        // A floor tipped almost flat whose near rows pass behind the viewer: the visible part must still draw.
-        let p = Projection(base:.identity,pivot:CGPoint(x:100,y:100),rx:1.5,ry:0,ty:60,focal:200)
-        let open = Path(); open.move(100,-400); open.line(100,400)
-        let (clipped,_) = p.project(open,ctm:.identity)!
-        let pts = clipped.flattened().flatMap(\.points)
-        XCTAssertEqual(pts.count,2); XCTAssertTrue(pts.allSatisfy { $0.y > 100 })
-        let ring = p.project(.rect(CGRect(x:60,y:-400,width:80,height:800)),ctm:.identity)!.0.flattened()
-        XCTAssertEqual(ring.count,1); XCTAssertTrue(ring[0].closed); XCTAssertEqual(ring[0].points.count,4)
-        XCTAssertNil(p.project(.rect(CGRect(x:60,y:300,width:80,height:100)),ctm:.identity))
-        let scene = Scene(), plane = PlaneNode(); plane.position = CGPoint(x:100,y:100); plane.anchor = CGPoint(x:100,y:100)
-        plane.rotationX = 1.5; plane.panY = 60; plane.perspective = 200
-        let grid = Designs.grid(width:200,height:800,spacing:20,color:.white); grid.position = CGPoint(x:0,y:-400)
-        try plane.add(grid); try scene.root.add(plane)
-        let c = try Canvas(width:200,height:200); try scene.draw(on:c,at:FrameTime(frame:0,fps:24))
-        XCTAssertGreaterThan((0..<200).filter { pixel(c,100,$0)[3] > 0 }.count,40)
-    }
-    func testDocumentPlaneTextPathRingsAndSkew() throws {
+    func testDocumentSkewTracksAndRejectsRemovedNodeTypes() throws {
         let dir = try temp(), url = dir.appendingPathComponent("scene.json")
-        let json = """
-        {"nodes":[{"type":"plane","x":64,"y":64,"anchor":[64,64],"tracks":{"rotationY":[[0,0],[1,0.8]],"panX":[[0,0],[1,10]]},
-                   "children":[{"type":"text","text":"HI","size":30,"x":64,"y":70,"align":"center","reveal":[[0,0],[1,1]]}]},
-                  {"type":"textpath","text":"ABCD","size":16,"radius":30,"x":64,"y":64,"align":"center","tracks":{"reveal":[[0,0],[1,1]],"offset":[[0,0],[1,20]]}},
-                  {"type":"rings","radius":4,"spacing":6,"count":5,"sides":6,"x":20,"y":110,"tracks":{"phase":[[0,0],[1,1]]}},
-                  {"type":"rect","width":10,"height":10,"skewX":0.3,"tracks":{"skewY":[[0,0],[1,0.2]]}}]}
-        """
-        try Data(json.utf8).write(to:url)
+        try Data("""
+        {"nodes":[{"type":"rect","x":40,"y":40,"width":40,"height":40,"skewX":0.3,"tracks":{"skewY":[[0,0],[1,0.4]]}}]}
+        """.utf8).write(to:url)
         let doc = try SceneDocument(url:url,width:128,height:128)
-        let tp = doc.scene.root.children[1] as! TextPathNode
-        XCTAssertEqual(tp.layout.glyphs.count,4); XCTAssertEqual(tp.sample(0)!.0.y,-30,accuracy:0.5)
-        func ink(_ t: Int, _ x0: Int, _ x1: Int, _ y0: Int, _ y1: Int) throws -> Int {
-            let c = try Canvas(width:128,height:128); try doc.scene.draw(on:c,at:FrameTime(frame:t,fps:24))
-            return (y0..<y1).reduce(0) { s,y in s+(x0..<x1).reduce(0) { $0+Int(pixel(c,$1,y)[3]) } }
+        func alpha(_ t: Int, _ x: Int, _ y: Int) throws -> UInt8 {
+            let c = try Canvas(width:128,height:128); try doc.scene.draw(on:c,at:FrameTime(frame:t,fps:24)); return pixel(c,x,y)[3]
         }
-        XCTAssertEqual(try ink(0,44,84,20,40),0); XCTAssertGreaterThan(try ink(24,30,100,20,45),0)
-        XCTAssertGreaterThan(try ink(24,40,90,50,80),0)
-        for bad in ["{\"nodes\":[{\"type\":\"textpath\",\"text\":\"A\",\"points\":[[0,0]]}]}",
-                    "{\"nodes\":[{\"type\":\"rings\",\"spacing\":0}]}",
-                    "{\"nodes\":[{\"type\":\"plane\",\"perspective\":0}]}",
+        XCTAssertEqual(try alpha(0,78,42),255); XCTAssertEqual(try alpha(24,78,42),0)   // the skewY track tips the right edge down
+        // 3D planes, text on a path, rings, shader nodes and particles were removed with the music-video features.
+        for bad in ["{\"nodes\":[{\"type\":\"textpath\",\"text\":\"A\"}]}", "{\"nodes\":[{\"type\":\"rings\"}]}",
+                    "{\"nodes\":[{\"type\":\"plane\"}]}", "{\"nodes\":[{\"type\":\"shader\",\"shader\":\"nebula\"}]}",
+                    "{\"particles\":[{\"count\":10}],\"nodes\":[]}",
                     "{\"nodes\":[{\"type\":\"text\",\"text\":\"A\",\"tracks\":{\"offset\":[[0,0],[1,1]]}}]}"] {
             try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
         }
@@ -244,23 +205,6 @@ final class GraphicsTests: XCTestCase {
         let clear = CIImage(color:.clear).cropped(to:bounds)
         canvas.image(try c.image(c.composite(red,over:clear,opacity:0.5,mask:mask)),in:bounds)
         XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:2); XCTAssertEqual(pixel(canvas,4,12)[3],0)
-    }
-    func testMetalParticlesDeterministicAndOriented() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
-        let particles = try MetalParticles(width:64,height:64,particles:[.init(origin:SIMD2(12,10),velocity:.zero,color:SIMD4(1,0,0,1),size:6,phase:1,life:2)])
-        let c = try Compositor(width:64,height:64), canvas = try Canvas(width:64,height:64)
-        canvas.image(try c.image(particles.render(at:0)),in:c.extent)
-        XCTAssertGreaterThan(pixel(canvas,12,10)[3],100); XCTAssertEqual(pixel(canvas,12,54)[3],0)
-        let a = Data(bytes:canvas.context.data!,count:canvas.context.bytesPerRow*64)
-        _ = try particles.render(at:3); canvas.clear(); canvas.image(try c.image(particles.render(at:0)),in:c.extent)
-        XCTAssertEqual(a,Data(bytes:canvas.context.data!,count:canvas.context.bytesPerRow*64))
-    }
-    func test3DPrimitivesRender() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
-        let scene = try Scene3D(width:64,height:64); scene.add(.torus,color:Color(0,1,1))
-        let c = try Compositor(width:64,height:64), canvas = try Canvas(width:64,height:64)
-        canvas.image(try c.image(scene.render(at:0)),in:c.extent)
-        XCTAssertGreaterThan((0..<64).reduce(0) { sum,y in sum+(0..<64).reduce(0) { $0+Int(pixel(canvas,$1,y)[3]) } },0)
     }
     func testNativeVideoFrameCountTimingAndDecode() async throws {
         let url = try temp().appendingPathComponent("test.mp4"), c = try Compositor(width:64,height:32)
@@ -283,19 +227,6 @@ final class GraphicsTests: XCTestCase {
         reader.add(output); XCTAssertTrue(reader.startReading()); var count = 0
         while output.copyNextSampleBuffer() != nil { count += 1 }; XCTAssertEqual(count,6)
     }
-    func testComputeSignalPreservesOrientationAndAlpha() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
-        let canvas = try Canvas(width:32,height:32); canvas.style.fill = Color(1,0.5,0.2,0.5); canvas.rect(0,0,32,8)
-        let input = CIImage(cgImage:try canvas.snapshot()), c = try Compositor(width:32,height:32)
-        let identity = try SignalEffect(width:32,height:32,grain:0,scanlines:0,chromaticPixels:0)
-        let output = try c.image(identity.apply(input,at:FrameTime(frame:4,fps:24)))
-        canvas.clear(); canvas.image(output,in:c.extent)
-        XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:2); XCTAssertEqual(pixel(canvas,4,28)[3],0)
-        let grain = try SignalEffect(width:32,height:32,grain:0.8,scanlines:0,chromaticPixels:0)
-        canvas.clear(); canvas.image(try c.image(grain.apply(input,at:FrameTime(frame:4,fps:24))),in:c.extent)
-        let alphaSum = (0..<8).reduce(0) { sum,y in sum+(0..<32).reduce(0) { $0+Int(pixel(canvas,$1,y)[3]) } }
-        XCTAssertLessThan(alphaSum,32*8*110)
-    }
     func testProResAlphaAndFractionalFPS() async throws {
         let url = try temp().appendingPathComponent("alpha.mov"), c = try Compositor(width:64,height:32)
         let writer = try VideoWriter(url:url,width:64,height:32,fps:30000.0/1001,codec:.prores4444)
@@ -306,62 +237,6 @@ final class GraphicsTests: XCTestCase {
         XCTAssertEqual(source.duration,5*1001.0/30000,accuracy:0.002)
         let canvas = try Canvas(width:64,height:32); canvas.image(try c.image(source.image(at:0,size:c.extent.size)),in:c.extent)
         XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:4); XCTAssertEqual(pixel(canvas,4,28)[3],0,accuracy:2)
-    }
-    func testShaderNodeDrawsProceduralNebulaInsideItsRevealedDisc() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
-        let url = try temp().appendingPathComponent("scene.json")
-        let json = """
-        {"nodes":[{"type":"shader","shader":"nebula","width":160,"height":90,"center":[80,45],"radius":40,"seed":7,
-                   "colors":["#3A0F5C","#FF5A1F","#FFD27A"],"core":1,"tracks":{"reveal":[[0,0.01],[1,1]],"brightness":[[0,2],[1,2]]}}]}
-        """
-        try Data(json.utf8).write(to:url)
-        let doc = try SceneDocument(url:url,width:160,height:90)
-        func light(_ frame: Int) throws -> (centre: Int, corner: Int) {
-            let c = try Canvas(width:160,height:90); c.clear(); try doc.scene.draw(on:c,at:FrameTime(frame:frame,fps:24))
-            let sum = { (x0: Int, y0: Int) in (y0..<y0+10).reduce(0) { s,y in s+(x0..<x0+10).reduce(0) { $0+Int(self.pixel(c,$1,y)[3]) } } }
-            return (sum(75,40), sum(0,0))
-        }
-        let early = try light(0), late = try light(24)
-        XCTAssertLessThan(early.centre,late.centre/4)     // reveal grows the cloud from nothing
-        XCTAssertGreaterThan(late.centre,1500)            // gas + synchrotron core light the middle
-        XCTAssertLessThan(late.corner,late.centre/3)      // outside the disc: only sparse stars
-        for bad in ["{\"nodes\":[{\"type\":\"shader\",\"shader\":\"plasma\"}]}",
-                    "{\"nodes\":[{\"type\":\"shader\",\"shader\":\"nebula\",\"colors\":[1]}]}",
-                    "{\"nodes\":[{\"type\":\"shader\",\"shader\":\"nebula\",\"tracks\":{\"trimEnd\":[[0,0],[1,1]]}}]}"] {
-            try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
-        }
-    }
-    func testStarfieldShaderDrawsSparseTwinklingStarsThatSwellOnTheBeat() throws {
-        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
-        let url = try temp().appendingPathComponent("scene.json")
-        try Data("""
-        {"nodes":[{"type":"shader","shader":"starfield","width":480,"height":270,"seed":3,"pulse":1,"twinkle":0.8,
-                   "colors":["#EDE6D8","#FF5A1F","#2EE6FF"],"tracks":{"beat":[[0,0],[1,1]]}}]}
-        """.utf8).write(to:url)
-        let doc = try SceneDocument(url:url,width:480,height:270)
-        func frame(_ n: Int) throws -> (sum: Int, lit: Int) {
-            let c = try Canvas(width:480,height:270); c.clear(); try doc.scene.draw(on:c,at:FrameTime(frame:n,fps:24))
-            var sum = 0, lit = 0
-            for y in stride(from:0,to:270,by:1) { for x in stride(from:0,to:480,by:1) { let a = Int(self.pixel(c,x,y)[3]); sum += a; if a > 40 { lit += 1 } } }
-            return (sum, lit)
-        }
-        let onBeat = try frame(0), settled = try frame(23)
-        XCTAssertGreaterThan(settled.lit,30)                   // there are stars ...
-        XCTAssertLessThan(settled.lit,480*270/20)             // ... sparse ones
-        XCTAssertGreaterThan(onBeat.sum,settled.sum*5/4)      // the beat swells them
-        try Data("{\"nodes\":[{\"type\":\"shader\",\"shader\":\"starfield\",\"tracks\":{\"swirl\":[[0,0],[1,1]]}}]}".utf8).write(to:url)
-        XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
-    }
-    func testAudioAnalysisUsesAbsoluteSampleBoundaries() throws {
-        let url = try temp().appendingPathComponent("tone.wav")
-        let format = AVAudioFormat(standardFormatWithSampleRate:44100,channels:1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:44100)!
-        buffer.frameLength = 44100
-        for i in 0..<44100 { buffer.floatChannelData![0][i] = Float(sin(Double(i)*2 * .pi*440/44100))*0.5 }
-        do { let file = try AVAudioFile(forWriting:url,settings:format.settings); try file.write(from:buffer) }
-        let result = try AudioAnalyzer().analyze(url:url,fps:30000.0/1001)
-        XCTAssertEqual(result.rms.count,30); XCTAssertEqual(result.rms[0],Float(0.5/sqrt(2)),accuracy:0.01)
-        XCTAssertEqual(result.bands[0].count,32); XCTAssertGreaterThan(result.bands[0].max()!,0.03)
     }
 
     func testMemoryCompositionLayerTransformsAndStaticCache() throws {

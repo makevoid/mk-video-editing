@@ -1,0 +1,15 @@
+{
+  "version":1,
+  "nodes":[
+    {"type":"group","name":"end","tracks":{"opacity":[[0.6,0],[1.8,1,"inOutCubic"]]},"children":[
+      {"type":"text","x":960,"y":470,"align":"center","text":"EXCERPT  ·  KEYNOTE  ·  MAIN STAGE","font":"AvenirNext-DemiBold","size":24,"tracking":7,"fill":"#50AF95"},
+      {"type":"line","points":[[960,502],[700,502]],"color":"#50AF95","strokeWidth":2,"tracks":{"trimEnd":[[0.8,0],[2.0,1,"inOutCubic"]]}},
+      {"type":"line","points":[[960,502],[1220,502]],"color":"#50AF95","strokeWidth":2,"tracks":{"trimEnd":[[0.8,0],[2.0,1,"inOutCubic"]]}},
+      {"type":"text","x":960,"y":590,"align":"center","text":"Talk Title — A subtitle for the talk","font":"AvenirNext-DemiBold","size":64,"fill":"#ffffff"},
+      {"type":"text","x":960,"y":664,"align":"center","text":"Speaker Name  ·  Role, Organization","font":"AvenirNext-Medium","size":36,"fill":"#ffffff",
+       "tracks":{"opacity":[[1.6,0],[2.4,1]]}},
+      {"type":"text","x":960,"y":724,"align":"center","text":"EVENT NAME 2026  ·  CITY  ·  DATE","font":"AvenirNext-Medium","size":22,"tracking":5,"fill":"#ffffffb0",
+       "tracks":{"opacity":[[2.2,0],[3.0,1]]}}
+    ]}
+  ]
+}

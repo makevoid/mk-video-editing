@@ -5,13 +5,12 @@ import CoreImage
 /// Versioned, declarative entry point for the Ruby pipeline. Swift clients can subclass Node directly.
 public final class SceneDocument {
     public let scene = Scene(), effects = EffectChain()
-    public private(set) var particles: [MetalParticles] = []
-    private let base: URL, data: [String:Any], width: Int, height: Int
+    private let base: URL, data: [String:Any]
     public init(url: URL, width: Int, height: Int, data: [String:Any] = [:]) throws {
-        base = url.deletingLastPathComponent(); self.data = data; self.width = width; self.height = height
+        base = url.deletingLastPathComponent(); self.data = data
         let raw = try JSONSerialization.jsonObject(with:Data(contentsOf:url))
         let doc = try Object(raw)
-        try doc.keys(["version","background","nodes","effects","particles","fonts"])
+        try doc.keys(["version","background","nodes","effects","fonts"])
         guard try doc.number("version",1) == 1 else { throw GraphicsError.invalid("Unsupported scene version") }
         for value in try doc.array("fonts") { guard let file = value as? String else { throw GraphicsError.invalid("Font must be a path") }; try TextLayout.registerFont(at:resolve(file)) }
         scene.background = try doc.color("background",.clear) ?? .clear
@@ -25,24 +24,7 @@ public final class SceneDocument {
                 else if let number = value as? NSNumber { parameters[key] = number }
                 else { throw GraphicsError.invalid("Unsupported filter parameter \(key)") }
             }
-            let name = try fx.string("name")
-            if name == "signal" {
-                let p = try fx.object("parameters"); try p.keys(["grain","scanlines","chromaticPixels"])
-                effects.effects.append(try SignalEffect(width:width,height:height,grain:p.number("grain",0.15),scanlines:p.number("scanlines",0.12),chromaticPixels:p.number("chromaticPixels",2)))
-            } else { effects.effects.append(try FilterEffect(name,parameters:parameters)) }
-        }
-        for raw in try doc.array("particles") {
-            let p = try Object(raw); try p.keys(["count","seed","color","size","speed","life"])
-            let count = try p.integer("count",2000), seed = try p.integer("seed",7)
-            guard count > 0 && count <= 1_000_000 && seed >= 0 else { throw GraphicsError.invalid("Particle count must be 1...1000000 and seed nonnegative") }
-            var rng = Random(seed:UInt64(seed)); let color = try p.color("color",Color(0.2,0.8,1))!
-            let size = try p.number("size",3), speed = try p.number("speed",35), life = try p.number("life",5)
-            let values = (0..<count).map { _ -> MetalParticles.Particle in
-                .init(origin:SIMD2(Float(rng.next()*Double(width)),Float(rng.next()*Double(height))),
-                      velocity:SIMD2(Float((rng.next()-0.5)*speed),Float(-rng.next()*speed)),
-                      color:SIMD4(Float(color.r),Float(color.g),Float(color.b),Float(color.a)),size:Float(size*(0.4+rng.next()*0.6)),phase:Float(rng.next()*life),life:Float(life))
-            }
-            particles.append(try MetalParticles(width:width,height:height,particles:values))
+            effects.effects.append(try FilterEffect(try fx.string("name"),parameters:parameters))
         }
     }
     private func resolve(_ path: String) -> URL { URL(fileURLWithPath:path,relativeTo:base).standardizedFileURL }
@@ -74,38 +56,13 @@ public final class SceneDocument {
                     "text","font","size","outline","outlineWidth","reveal","path","frames","fps","loop","audioAt","clipData","clipName",
                     "progress","spacing","seed","roughness","samples","samplesData","words","wordsData","entrance","color","arcStart","arcEnd","arcMode",
                     "trimStart","trimEnd","boil","boilRate","align","tracking","strength","falloff","twist","center","resolution",
-                    "skewX","skewY","rotationX","rotationY","z","panX","panY","perspective","offset","count","sides","aspect","fade","glow","glowCore",
-                    "shader","colors","brightness","drift","detail","swirl","filaments","core","stars","twinkle","pulse"])
+                    "skewX","skewY","glow","glowCore"])
         let type = try o.string("type"), name = try o.string("name","")
         let w = try o.number("width",100), h = try o.number("height",100), radius = try o.number("radius",50)
         let color = try o.color("color",Color(0,1,1)) ?? .clear
         let n: Node
         switch type {
         case "group": n = Group(name:name)
-        case "plane":
-            let plane = PlaneNode(name:name)
-            plane.rotationX = try o.number("rotationX",0); plane.rotationY = try o.number("rotationY",0); plane.z = try o.number("z",0)
-            plane.panX = try o.number("panX",0); plane.panY = try o.number("panY",0); plane.perspective = try o.number("perspective",1400)
-            guard plane.perspective > 0 else { throw GraphicsError.invalid("plane perspective must be positive") }; n = plane
-        case "textpath":
-            let path: Path
-            if o.raw["points"] != nil {
-                let p = try points(o); guard p.count >= 2 else { throw GraphicsError.invalid("textpath points need at least 2 points") }
-                path = try o.bool("closed",false) ? .polygon(p,closed:true) : .spline(p)
-            } else {
-                // Circle starting at the top, running clockwise: glyphs stand outside the ring.
-                path = .polygon((0..<180).map { i in let a = -Double.pi/2+Double(i)*2*Double.pi/180; return CGPoint(x:cos(a)*radius,y:sin(a)*radius) },closed:true)
-            }
-            let tp = try TextPathNode(try o.string("text"),path:path,font:try font(o),size:try o.number("size",48),tracking:try o.number("tracking",0),name:name)
-            guard let align = TextNode.Alignment(rawValue:try o.string("align","left")) else { throw GraphicsError.invalid("align must be left, center or right") }; tp.alignment = align
-            tp.color = try o.color("fill",.white) ?? .clear; tp.outlineColor = try o.color("outline",nil); tp.outlineWidth = try o.number("outlineWidth",0)
-            tp.offset = try o.number("offset",0); n = tp
-        case "rings":
-            let rings = RingsNode(count:try o.integer("count",12),radius:radius,spacing:try o.number("spacing",40),sides:try o.integer("sides",0),name:name)
-            rings.color = try o.color("stroke",color) ?? color; rings.lineWidth = try o.number("strokeWidth",1.5); rings.twist = try o.number("twist",0)
-            rings.aspect = try o.number("aspect",1); rings.fade = try o.number("fade",1); rings.dash = try o.numbers("dash").map { CGFloat($0) }
-            rings.boil = try o.number("boil",0); rings.seed = UInt64(max(0,try o.integer("seed",1)))
-            guard rings.count <= 2000, rings.spacing != 0 else { throw GraphicsError.invalid("rings count must be 1...2000 and spacing nonzero") }; n = rings
         case "rect","square","circle","ellipse","line","point","triangle","quad","polygon","path","spline","arc","star","paper":
             let path: Path
             switch type {
@@ -177,15 +134,6 @@ public final class SceneDocument {
             let trace = TraceNode(try points(o),name:name); trace.color = color; trace.lineWidth = try o.number("strokeWidth",3)
             if let progress = o.raw["progress"] { trace.progress = try track(progress) }; n = trace
         case "grid": n = Designs.grid(width:w,height:h,spacing:try o.number("spacing",48),color:color)
-        case "shader":
-            let shader = try ShaderNode(shader:try o.string("shader"),width:w,height:h,name:name)
-            if let list = o.raw["colors"] { guard let hexes = list as? [String], !hexes.isEmpty else { throw GraphicsError.invalid("shader colors must be hex strings") }; shader.colors = try hexes.map { try Color(hex:$0) } }
-            shader.center = try o.point("center",CGPoint(x:w/2,y:h/2)); shader.radius = max(0,try o.number("radius",0))
-            shader.reveal = try o.number("reveal",1); shader.brightness = try o.number("brightness",1); shader.drift = try o.number("drift",0.25)
-            shader.detail = try o.number("detail",3); shader.swirl = try o.number("swirl",4); shader.filaments = try o.number("filaments",1)
-            shader.core = try o.number("core",0); shader.stars = try o.number("stars",shader.shader == "starfield" ? 1 : 0); shader.seed = try o.number("seed",1); shader.resolution = try o.number("resolution",1)
-            shader.twinkle = max(0,min(1,try o.number("twinkle",0.6))); shader.pulse = max(0,try o.number("pulse",0))
-            n = shader
         case "warpgrid":
             let grid = WarpGridNode(width:w,height:h,spacing:try o.number("spacing",60),center:try o.point("center",CGPoint(x:w/2,y:h/2)),name:name)
             grid.color = color; grid.lineWidth = try o.number("strokeWidth",1); grid.strength = try o.number("strength",0.5)
@@ -222,10 +170,6 @@ public final class SceneDocument {
         switch n {
         case is ShapeNode: specific = ["trimStart","trimEnd","strokeWidth","dashPhase"]
         case is WarpGridNode: specific = ["strength","twist","strokeWidth"]
-        case is PlaneNode: specific = ["rotationX","rotationY","z","panX","panY"]
-        case is TextPathNode: specific = ["offset","reveal"]
-        case is RingsNode: specific = ["phase","twist","spacing","strokeWidth"]
-        case is ShaderNode: specific = ["evolve","reveal","brightness","beat"]
         default: specific = []
         }
         let animated = ["x","y","rotation","scaleX","scaleY","opacity","skewX","skewY","glow"] + specific

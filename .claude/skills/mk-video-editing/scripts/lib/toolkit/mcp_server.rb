@@ -9,9 +9,8 @@ module Toolkit
   # Only the Fal-facing recipes need the configured secret. Local setup, file
   # editing, and recording the user's approval stay in the ordinary Ruby CLI.
   class CredentialTasks
-    TASKS = %w[doctor voice:tts music:score audio:transcribe media:stems media:upload sfx:gen
-      pipeline:all adopt gen:music gen:overlay review:music].freeze
-    OPTIONS = %w[RUN ONLY FORCE NEW_REQUEST SFX REFRESH_UPLOAD VOICE SPEED STABILITY STYLE MODEL].freeze
+    TASKS = %w[doctor voice:tts music:score sfx:gen].freeze
+    OPTIONS = %w[RUN ONLY FORCE NEW_REQUEST SFX VOICE SPEED STABILITY STYLE MODEL].freeze
     OUTPUT_LIMIT = 20_000
     MAX_RUNNING = 10
     PLUGIN_KEY = "FAL_AI_API_KEY_PLUGIN"
@@ -121,7 +120,7 @@ module Toolkit
     TOOLS = [
       { name: "credential_status", description: "Check whether the Fal API key is configured. Never returns its value.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
-      { name: "run_task", description: "Start an explicitly requested Fal audio task (voice:tts narration, music:score bed, transcription, stems) in an initialized, trusted video project. May upload media and incur Fal charges. Recorded production approval covers necessary uploads and generation within budget across RUNs. Native Swift is the default; do not propose remote image/video generation. Project Ruby configuration is executable code. Returns immediately; poll task_status. Local setup and plan approval use the Ruby CLI.",
+      { name: "run_task", description: "Start an explicitly requested Fal audio task (voice:tts narration, music:score bed, sfx:gen prompt sounds) in an initialized, trusted video project. Incurs Fal charges. The recorded plan approval covers the generation it describes. Footage editing and titles are local; do not propose remote image/video generation. Returns immediately; poll task_status. Local setup and plan approval use the Ruby CLI.",
         inputSchema: { type: "object", properties: {
           project: { type: "string", description: "Absolute path of the initialized video project" },
           task: { type: "string", description: "One Rake task, e.g. voice:tts[audio/narration/intro.txt,audio/narration/intro.mp3] or music:score[audio/music_prompt.txt,audio/music.mp3,95]" },

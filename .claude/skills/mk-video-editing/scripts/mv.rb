@@ -12,13 +12,12 @@ require "open3"
 runtime = __dir__
 options = {}
 parser = OptionParser.new do |o|
-  o.banner = "Usage: ruby scripts/mv.rb [--project DIR] TASK [task arguments]\n       ruby scripts/mv.rb init --project DIR --media FOOTAGE_DIR --prompt-file FILE   (footage edit)\n       ruby scripts/mv.rb init --project DIR --song FILE --prompt-file FILE          (motion-graphics music video)\nRuby is the only execution entry. Tasks use ENV ONLY/FORCE/VFX/SFX."
+  o.banner = "Usage: ruby scripts/mv.rb [--project DIR] TASK [task arguments]\n       ruby scripts/mv.rb init --project DIR --media FOOTAGE_DIR --prompt-file FILE   (footage edit)\nRuby is the only execution entry. Tasks use ENV ONLY/FORCE/VFX/SFX."
   o.on("--project DIR", "Project workspace (defaults to bundled runtime)") { |v| options[:project] = File.expand_path(v) }
   o.on("--media PATH", "Footage file or folder for an edit project (repeatable)") { |v| (options[:media] ||= []) << File.expand_path(v) }
-  o.on("--song FILE", "Local soundtrack for a motion-graphics music video project") { |v| options[:song] = File.expand_path(v) }
   o.on("--prompt-file FILE", "Creative brief for init") { |v| options[:prompt] = File.expand_path(v) }
   o.on("-T", "List all rake tasks") { options[:list] = true }
-  o.on("--help", "Show tasks and exit") { puts o; puts "Edit tasks: edit:transcribe, edit:analyze, edit:track, edit:stats, edit:stills, edit:sheet, edit:preview, edit:render, speech:clean, speech:mix, speech:measure, voice:tts.\nTasks: init, setup, doctor, test, plan:approve, work:next, work:accept, audio:analyze, audio:map, audio:transcribe_local, media:stems_local, graphics:preview, graphics:render, sfx:gen, sfx:mix, vfx:render. Use -T for the complete rake task list.\nExit: 0 success; 1 task/runtime failure; 2 invalid CLI or missing input. No interactive shell prompts."; exit }
+  o.on("--help", "Show tasks and exit") { puts o; puts "Edit tasks: edit:transcribe, edit:analyze, edit:track, edit:stats, edit:stills, edit:sheet, edit:preview, edit:render, speech:clean, speech:mix, speech:measure, voice:tts.\nAlso: speech:flow, speech:loudnorm, music:score, graphics:preview, graphics:render, vfx:render, sfx:gen, sfx:mix, media:twitter, media:youtube.\nTasks: init, setup, doctor, test, plan:approve, work:next, work:accept, work:log, work:watch. Use -T for the complete rake task list.\nExit: 0 success; 1 task/runtime failure; 2 invalid CLI or missing input. No interactive shell prompts."; exit }
 end
 begin
   parser.parse!(ARGV)
@@ -26,8 +25,7 @@ begin
   if command == "init"
     require_relative "lib/toolkit/initializer"
     init = Toolkit::Initializer.new(runtime)
-    puts JSON.pretty_generate(options[:media] ? init.create_edit(project: options[:project], media: options[:media], prompt: options[:prompt]) :
-                                                init.create(project: options[:project], song: options[:song], prompt: options[:prompt]))
+    puts JSON.pretty_generate(init.create_edit(project: options[:project], media: Array(options[:media]), prompt: options[:prompt]))
     exit
   end
   project = options[:project] || runtime

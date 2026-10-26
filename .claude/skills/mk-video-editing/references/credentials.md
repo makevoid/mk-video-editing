@@ -6,7 +6,7 @@ Footage editing needs no API key: transcription (mlx-whisper), analysis, the vir
 |---|---|---|
 | `voice:tts[text.txt,out.mp3]` | ElevenLabs TTS (`MODEL=v4` for Eleven v4) | narration lines |
 | `music:score[prompt.txt,out.mp3,seconds]` | ElevenLabs Music v2.5 | a background music bed |
-| `audio:transcribe`, `media:stems`, `sfx:gen` (prompt sounds) | Whisper, Demucs, Stable Audio | only when the local equivalents are not wanted |
+| `sfx:gen` with `prompt:` sounds | Stable Audio SFX | a described sound effect the procedural `synth:` sounds cannot make |
 
 Write the requested calls (lines, voice, expected count and retries) into `docs/PLAN.md` and record approval with `NOTE='...' plan:approve` before the first paid call. Existing approval within that scope stays valid; do not ask again per line.
 
@@ -20,4 +20,4 @@ Initialize the project, run setup, write the plan and record approval through th
 
 Outside the plugin the Ruby CLI reads only `FAL_AI_API_KEY` from its environment (export it in the shell that starts Claude Code). Do not put keys in source, prompts or config files. The MCP server prefers its plugin option and falls back to the exported key when the option is unset; ordinary shell tasks cannot see the plugin option.
 
-Uploaded media URLs may be accessible to anyone with the link. `doctor` checks local dependencies only; a missing Fal key never fails it.
+The MCP server runs only `doctor`, `voice:tts`, `music:score` and `sfx:gen`; everything else goes through the Ruby CLI. `doctor` checks local dependencies only; a missing Fal key never fails it.

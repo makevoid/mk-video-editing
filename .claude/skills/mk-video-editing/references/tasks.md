@@ -1,164 +1,140 @@
-# Ruby entry points and task recipes
+# Ruby entry points and task reference
 
-## Directory layers
+## Layout
 
 ```text
 mk-video-editing/
-  SKILL.md
-  references/                    agent instructions (footage-editing.md is the editing reference)
-  assets/plan-template.md        planning document template
-  assets/scene-template.rb       runnable scene generator skeleton (copy to <project>/scenes/)
-  assets/finish-cues-template.rb SFX/VFX cue sheets from the scene's events (copy to <project>/scenes/)
+  SKILL.md                       workflow (start here)
+  references/
+    footage-editing.md           medit, EDL schema, generator pattern, jump cuts, lessons
+    finishing.md                 music bed, sound effects, VFX, order of passes
+    tasks.md                     this file: every task and the directory layers
+    credentials.md               optional Fal key (narration, music, prompt SFX)
+    testing.md                   RSpec profiles and behavioral review
   scripts/
-    mv.rb                        Ruby CLI/bootstrap/project initializer
-    Rakefile                     require Ruby task registry; install delegates
-    Gemfile + Gemfile.lock        Ruby dependencies, including RSpec
-    requirements.txt             Python dependencies installed by Ruby setup
+    mv.rb                        Ruby CLI: init, setup, every task
+    mcp.rb                       MCP server for paid tasks in plugin sessions
+    Rakefile, Gemfile(.lock)     task registry and Ruby dependencies (incl. RSpec)
+    requirements.txt             Python packages for the project venv (numpy, Pillow)
     lib/
-      tasks.rb                   thin rake declarations
-      toolkit/                   task application services and test runner
-      workflow/                  plan approval and wave allocation
-      runtime.rb                 load media services and audio/composition steps
-      pipeline/                  audio runs, local composition and manifests
-      fal/                       audio adapters, queue/storage client and schemas
-      media/                     Ruby wrappers that shell out
+      tasks.rb                   thin rake declarations from Toolkit::Operations::TASKS
+      toolkit/                   operations (task bodies), initializer, MCP server, fonts
+      workflow/                  plan approval, dependency waves, worker journal
+      media/                     services: edit (medit), speech, cuts, graphics, anim, vfx, sfx, guard, ffmpeg, python…
+      fal/                       queue client, schemas, ElevenLabs TTS/Music and Stable Audio SFX adapters
     tools/
       edit/                      medit: Swift footage editor (analysis, virtual camera, deflicker, grade, render)
-      python/                    speech flow, local transcription, analysis, cutouts and audio mixing
-      graphics/                  Swift library/renderer, JSON examples; project fonts copied before rendering
-      vfx/                       Swift package and Core Image effects
-    spec/                        high-level RSpec contracts and E2E tests
+      graphics/                  MotionGraphics library + mgraphics CLI (titles, SoundSynth); examples/ title templates
+      vfx/                       mvfx: Core Image + Metal effects on rendered video
+      python/                    transcription, speech flow, Demucs stems, beats/energy, cut detection, SFX mix
+    spec/                        RSpec contracts and end-to-end tests
 ```
 
-`init` copies the executable toolkit to a new project with the same `Rakefile → lib → tools` layers and adds `config/`, `audio/`, `prompts/`, `docs/`, `output/`. It excludes installed dependencies, build caches, generated outputs and test scratch data. Each project is self-contained; install dependencies there with `setup`. Ruby 3.2+ is required by the OOP code. Run the CLI using the same Ruby used for Bundler.
+`init` copies the runtime (`scripts/` minus build caches and outputs) into the project. It also copies `SKILL.md` and `references/` into `.skill/`, and creates `source/` (symlinks to the footage), `audio/`, `analysis/`, `edit/`, `docs/`, `output/`, `scenes/` and `config/`. A project runs **its own copy** of `lib/` and `tools/`: after changing the skill, `rsync` the changed files into the project and rebuild its Swift tools.
 
-All examples below are executed from the skill directory. Replace `/absolute/project` with the real initialized project path. `ruby scripts/mv.rb --project /absolute/project 'TASK[...]'` and, inside the project, `bundle exec rake 'TASK[...]'` are equivalent. CLI flags precede/follow the task; task arguments use Rake brackets. Quote bracket expressions in zsh. For file names containing commas, rename/copy the input in Ruby before using Rake's comma-separated arguments.
+Run tasks with `ruby "${CLAUDE_SKILL_DIR}/scripts/mv.rb" --project /abs/project 'task[a,b]'`. Inside a project, `bundle exec rake 'task[a,b]'` is equivalent. In examples below, `mv` stands for the former. Quote bracket expressions in zsh. Rake splits arguments on commas, so rename inputs whose names contain commas. Options are environment variables (`JOBS=1 mv …`).
 
+## Setup
 
-## Setup and inspection
+| Task | Purpose |
+| --- | --- |
+| `init --project DIR --media PATH… --prompt-file brief.md` | New footage project (media is symlinked, never copied or changed) |
+| `setup` | Bundler, `.venv` with numpy/Pillow, then builds mgraphics, mvfx and medit |
+| `doctor` | JSON checks: ffmpeg, ffprobe, magick, python3, swift, uv, Ruby ≥ 3.2, Apple Silicon, Python packages, built tools; `STRICT=1` fails on a missing one |
+| `edit:build`, `graphics:build`, `vfx:build` | Rebuild one Swift tool after changing its sources |
+| `fonts:list`, `fonts:copy[config/fonts.json]` | List installed macOS TTF/OTF faces, then copy the selected ones into the project's `tools/graphics/fonts/` (refuses to replace different bytes) |
+| `test` | RSpec; `PROFILE=all|core|media|swift` ([testing.md](testing.md)) |
+
+`MV_PYTHON` overrides the venv interpreter. Before `setup`, Python scripts run in an ephemeral `uv` environment. `MV_WHISPER_MODEL`, `MV_WHISPER_LANG` and `MV_DEMUCS_MODEL` choose the local models.
+
+## Footage editing (medit)
+
+The full reference is in [footage-editing.md](footage-editing.md).
+
+| Task | Purpose |
+| --- | --- |
+| `edit:transcribe[out_dir,source…]` | mlx-whisper word transcripts, one JSON per source; `VERBATIM=1` keeps fillers |
+| `edit:analyze[source,out.json]` | Stabilization path, flicker tiles, color stats, Vision people; `REGION`, `DETECT_REGION`, `DETECT_EVERY`, `FROM`/`TO` |
+| `edit:track[analysis,out.json]` | Speaker track; `SEED`, `STAGE`, `SIZE`, `SPACE=frame` |
+| `edit:stats[analysis,from,to]` | Exposure/color/flicker summary |
+| `edit:stills[edl,dir,t…]` | Review stills; `DEBUG=1` adds crop/subject/safe outlines on the full frame |
+| `edit:sheet[edl,out.jpg,every_s]` | Contact sheet of the timeline |
+| `edit:preview[edl,out.mp4,from,to]` | Half-res draft of a range; `SCALE`, `JOBS` |
+| `edit:render[edl,out.mp4]` | Final; `FROM`/`TO`, `BITRATE`, `CODEC`, `JOBS` (keep 1 below 32 GB RAM) |
+
+## Speech and narration
+
+| Task | Purpose |
+| --- | --- |
+| `speech:clean[in,out.wav]` | Dialogue cleanup; `PRESET=room|light|<ffmpeg chain>`, `ISOLATE=1` (local Demucs vocals), `AMBIENCE` |
+| `speech:flow[transcript,audio,out.json]` | Fillers, hums, repeats, false starts and pauses with proposed cuts; writes `out.txt` to read |
+| `speech:mix[edl,out.wav]` | Timeline mix: clip audio, crossfades, `audio_duck`, `sounds`, ducked `music`, two-pass loudnorm (`LUFS`, `TP`) |
+| `speech:measure[path…]`, `speech:loudnorm[in,out.wav]` | Loudness/noise report; standalone normalization |
+| `voice:tts[text.txt,out.mp3]` | Narration via Fal ElevenLabs (paid, approved plans only); `VOICE`, `SPEED`, `STABILITY`, `STYLE`, `MODEL=v4` |
+| `audio:transcribe_local[audio,out.json,from,seconds]` | mlx-whisper on any audio range |
+| `media:stems_local[audio,out_dir,from,seconds]` | Local Demucs: vocals, no_vocals, drums, bass, other |
+
+## Titles and graphics (mgraphics)
+
+The scene format and title templates are in `scripts/tools/graphics/README.md`.
 
 ```sh
-ruby scripts/mv.rb --help
-ruby scripts/mv.rb -T
-ruby scripts/mv.rb --project /absolute/project setup
-ruby scripts/mv.rb --project /absolute/project doctor
+ONLY=0,60,150 mv 'graphics:render[edit/titles/opening.json,edit/review/opening,300,1920,1080,30]'      # stills
+CODEC=prores4444 SUPERSAMPLE=2 mv 'graphics:render[edit/titles/opening.json,edit/titles/opening.mov,300,1920,1080,30]'
+mv 'graphics:preview[edit/titles/opening.json,output/opening_draft.mp4,0,6]'                               # 1x, 30 fps draft
 ```
 
-`setup` calls Bundler and Python venv/pip through Ruby, then builds both Swift packages. Install system Ruby, FFmpeg/ffprobe, ImageMagick and Swift/Xcode command line tools on macOS 14+ beforehand. `MV_PYTHON` overrides the local `.venv/bin/python3`; `MEDIA_FONT` overrides the detected font path. `doctor` prints JSON booleans; `STRICT=1` makes missing dependencies fail. Tests require the full selected profile's tools and do not silently skip missing dependencies.
+`graphics:render[scene,out,frames,width,height,fps]` takes `frames` = seconds × fps and accepts `PLATE`, `AUDIO`, `CODEC`, `SUPERSAMPLE`, `BITRATE`, `GLOW=gpu|cg`, `JOBS` and `ONLY`. `graphics:preview` takes `FPS`, `SUPERSAMPLE`, `WIDTH`, `HEIGHT`, `JOBS`, `GLOW` and `AUDIO`. `anim:render` writes PNG frames of a scene, and `graphics:benchmark` reports fps without writing files.
 
-`fonts:list` scans installed macOS TTF/OTF files. Just before rendering, `fonts:copy[config/fonts.json]` copies a JSON mapping of project filenames to absolute source paths into the video's `tools/graphics/fonts/`. Run with `--project /absolute/video-workspace`; see [Project fonts](animation-audio-vfx.md#project-fonts). Setup does not fetch fonts.
+## Music, sound effects and VFX
 
-## Native scenes, previews and finals
+The recipes are in [finishing.md](finishing.md).
 
-The step-by-step process is in [native-workflow.md](native-workflow.md); the recipes are in [scene-cookbook.md](scene-cookbook.md).
+| Task | Purpose |
+| --- | --- |
+| `music:score[prompt.txt,out.mp3,seconds]` | Instrumental bed via Fal ElevenLabs Music v2.5 (paid, approved plans only) |
+| `audio:analyze[audio,out_dir]` | `beats.json` + `energy.json`, for timing titles or cuts to music |
+| `sfx:gen`, `sfx:mix` | `SFX=name`: synthesize the sounds in `prompts/<name>/sfx.yml`, then mix them on their cues |
+| `vfx:analyze`, `vfx:stills[f…]`, `vfx:clip[from,to]`, `vfx:render` | `VFX=name`: cue analysis, stills, interval, full render from `prompts/<name>/cues.yml` |
+| `media:cuts[video,out.json]` | Picture cut detection |
+
+## Media utilities and delivery
+
+| Task | Purpose |
+| --- | --- |
+| `media:probe[path]` | ffprobe summary |
+| `media:frame[video,s,out.png]`, `media:frames[video,dir,fps,width]` | One frame; frames at an interval |
+| `media:sheet[video,out.jpg]`, `media:montage[out.jpg,cols,width,img…]` | Contact sheets |
+| `media:cut[video,out.mp4,start,s]`, `media:audio_cut[src,out.wav,start,s]` | Cut a range |
+| `media:concat[out.mp4,a,b…]`, `media:mux[video,audio,out.mp4]` | Join clips; replace audio |
+| `media:twitter[video,out.mp4]` | X upload spec (below) |
+| `media:youtube[video,out.mp4]` | 4K master: scaled to fill 3840×2160, converted and tagged BT.709 |
+| `media:faststart[video,out.mp4]` | Lossless copy with the index moved to the front |
+
+**X/Twitter delivery.** `media:twitter[video,out.mp4]` produces:
+- MP4, H.264 High@4.2, yuv420p, square pixels, tagged BT.709 (untagged/BT.601 sources are converted);
+- the 16:9 1920×1080, 9:16 1080×1920 or 1:1 1080×1080 box, fitted without upscaling (a source within 1 % of the ratio is fill-cropped);
+- the source frame rate, capped at 60;
+- closed 1 s GOPs and faststart;
+- CRF 16 under a 24 Mb/s cap (`CRF`, `MAX_MBPS` ≤ 25, `TUNE`);
+- AAC-LC audio.
+
+It refuses to overwrite `out`, and reports `mbps`, `fits_free` (≤ 140 s, ≤ 512 MB) and `fits_premium`.
+
+## Approval, waves and progress
 
 ```sh
-cd /absolute/project && ruby scenes/video.rb      # the scene generator: writes scenes/video.json + scenes/video.events.json
-AUDIO=audio/excerpt.wav ruby scripts/mv.rb --project /absolute/project 'graphics:preview[scenes/video.json,output/preview.mp4,0,10]'
-ONLY=600,601 ruby scripts/mv.rb --project /absolute/project 'graphics:render[scenes/video.json,output/stills,1800,1920,1080,60]'
-JOBS=8 AUDIO=audio/excerpt.wav SUPERSAMPLE=2 BITRATE=15000000 ruby scripts/mv.rb --project /absolute/project 'graphics:render[scenes/video.json,output/video_clean.mp4,1800,1920,1080,60]'
-FROM=1440 SUPERSAMPLE=2 ruby scripts/mv.rb --project /absolute/project 'graphics:benchmark[scenes/video.json,48,1920,1080,60]'
-cd /absolute/project && ruby scenes/finish_cues.rb output/video_clean.mp4
+NOTE='User approved the plan in chat' mv plan:approve      # binds approval to the current docs/PLAN.md
+mv work:next                                               # SIZE=… allocates dependency-ready jobs from config/production.json
+JOB=titles EVIDENCE=edit/review/titles.md mv work:accept
+AGENT=titles EVENT=render MESSAGE='opening.mov done' mv work:log
+mv work:watch                                              # LIMIT=…
 ```
 
-- `graphics:preview[scene,out,from_s,to_s]` renders a draft at 1× and 30 fps, with the `AUDIO` cut to the range.
-  `FPS`/`SUPERSAMPLE`/`WIDTH`/`HEIGHT`/`JOBS`/`GLOW` override the defaults.
-- `graphics:render[scene,out,frames,width,height,fps]`:
-  - takes `frames` as video seconds × fps;
-  - writes a PNG directory when `out` has no movie extension (with `ONLY`, only the listed frames);
-  - accepts `PLATE`, `AUDIO`, `CODEC=prores4444` (`.mov` with alpha), `SUPERSAMPLE`, `BITRATE`, `GLOW=gpu|cg` and `JOBS` (parallel chunks).
-- `graphics:benchmark` reports fps without writing files.
-- The scene generator and `finish_cues.rb` are plain Ruby scripts inside the project. They only write JSON/YAML; rendering still goes
-  through `mv.rb`.
+Paid tasks check the approval and fail if `docs/PLAN.md` changed after it was recorded. Waves let parallel sub-agents take independent jobs (titles, narration lines, review stills) and log progress. Each job names its `depends`, and two jobs never share a `run`. Heavy media jobs still run one at a time ([SKILL.md](../SKILL.md#memory-safety-mandatory)).
 
-## Creative approval and progress
+## Fal schemas
 
-```sh
-NOTE='User approved the linked creative plan' ruby scripts/mv.rb --project /absolute/project plan:approve
-AGENT=main EVENT=preview MESSAGE='Opening rendered for review' ruby scripts/mv.rb --project /absolute/project work:log
-ruby scripts/mv.rb --project /absolute/project work:watch
-```
+`openapi:fetch` saves the current input schemas of the bundled Fal endpoints (ElevenLabs TTS v2/v4, ElevenLabs Music, Stable Audio SFX) under `specs/`, and `openapi:summary` prints them. Requests are validated against a saved schema before submission. Identical requests resume from their receipt in `output/requests/`; `NEW_REQUEST=1` forces a fresh, paid request.
 
-`work:next` and `work:accept` can track dependency-ready local jobs when the project uses `config/production.json`; they do not submit media to a service. Use `graphics:preview` and `graphics:render` directly for scenes. The default rendering and finishing workflow runs locally.
-
-## Optional Fal audio
-
-Use these only for audio work the user explicitly requests. Read [credentials.md](credentials.md) first. Keep the normal supplied-song, local-analysis and Swift-SFX path otherwise.
-
-```sh
-ruby scripts/mv.rb --project /absolute/project openapi:fetch
-ruby scripts/mv.rb --project /absolute/project openapi:summary
-ruby scripts/mv.rb --project /absolute/project 'audio:transcribe[audio/song.wav,audio/words.json]'
-ruby scripts/mv.rb --project /absolute/project 'media:stems[audio/song.wav,audio/stems,vocals]'
-```
-
-In plugin sessions, run the paid tasks via the `mk-video-editing` MCP server. Schema inspection stays in the Ruby CLI. The schemas cover only Music3, Stable Audio SFX, Whisper and Demucs.
-
-For Music3, `config/generations.rb` returns a Hash evaluated inside `Pipeline`:
-
-```ruby
-{
-  "audio-demo" => { steps: [Steps::Music], duration: 10, upload_music: false, lyrics: [] }
-}
-```
-
-Write `prompts/audio-demo/03_music_prompt.txt` and `03_music_lyrics.txt`, include the requested call and retry allowance in `docs/PLAN.md`, and record the user's approval with `plan:approve`. Then run `RUN=audio-demo gen:music`. Output and request receipts are retained under `output/`. `review:music` checks local metrics; when `upload_music: true`, it also uses paid Whisper. `music_from:` and `music_offset:` reuse a supplied local soundtrack instead of generating one.
-
-`sfx:gen` also retains Stable Audio SFX support when a sound has `prompt:` rather than `synth:` or `tone:`. Use prompt-based SFX only when requested and approved; native synthesis needs no Fal key.
-
-The optional run pipeline supports only `Steps::Music` and `Steps::Overlay`. For an existing local scene, set `plate:` to a supplied image/video path or omit it for a scene that draws its own background. Optional `clips:` points to local clip metadata JSON. Write `prompts/<run>/05_overlay.json`, run `anim:prepare[full-song-words.json]`, then `anim:preview[0,24]` / `anim:overlay` for local composition. `gen:overlay` instead uses paid Whisper to prepare captions. `pipeline:all` processes the configured audio/composition steps and may call paid audio services; it is not the default video command.
-
-`media:preview[out.mp4,s01,s02]` joins contiguous run sections with one continuous song. `history`, `adopt`, `pick` and `import` retain audio request recovery/reuse. Retrying an identical Fal request resumes its saved receipt; use `NEW_REQUEST=1` only for an authorized fresh request. The pipeline has no image/video generation steps.
-
-## Analysis, finishing and utility tasks
-
-```sh
-ruby scripts/mv.rb --project /absolute/project 'audio:analyze[audio/source.mp3,audio]'
-ruby scripts/mv.rb --project /absolute/project 'media:frames[reference.mp4,output/reference_frames,12,480]'
-ruby scripts/mv.rb --project /absolute/project 'media:cuts[reference.mp4,output/cuts.json]'
-ruby scripts/mv.rb --project /absolute/project 'media:montage[output/review/strip.jpg,8,240,tmp/f/f_097.png,tmp/f/f_098.png]'
-ruby scripts/mv.rb --project /absolute/project 'audio:transcribe_local[audio/source.mp3,audio/words_local.json,23,12]'
-ruby scripts/mv.rb --project /absolute/project 'media:stems_local[audio/song.wav,audio/stems,0,0]'
-ruby scripts/mv.rb --project /absolute/project 'audio:map[audio/song.wav,audio/map,audio/stems]'
-ruby scripts/mv.rb --project /absolute/project 'audio:beatmap[audio/song.wav,audio/map/beatmap.json,audio/stems/drums.wav]'
-ruby scripts/mv.rb --project /absolute/project 'audio:hits[audio/stems/drums.wav,audio/map/hits.json,audio/map/beatmap.json,audio/stems/bass.wav]'
-ruby scripts/mv.rb --project /absolute/project 'audio:vocals[audio/stems/vocals.wav,audio/map/vocals.json,audio/map/beatmap.json]'
-ruby scripts/mv.rb --project /absolute/project 'audio:sections[audio/song.wav,audio/map/sections.json,audio/map/beatmap.json,audio/map/hits.json,audio/map/vocals.json]'
-ruby scripts/mv.rb --project /absolute/project 'audio:excerpt[audio/song.wav,audio/excerpt.wav,23,114.5,1.7]'
-ruby scripts/mv.rb --project /absolute/project 'media:mouth[assets/singer-frames,audio/stems/vocals.wav,0,120,60,40,20]'
-ruby scripts/mv.rb --project /absolute/project 'anim:render[tools/graphics/examples/futuristic.json,tmp/smoke,48,1920,1080]'
-SFX=finish-sfx ruby scripts/mv.rb --project /absolute/project sfx:gen
-SFX=finish-sfx ruby scripts/mv.rb --project /absolute/project sfx:mix
-VFX=finish-vfx ruby scripts/mv.rb --project /absolute/project vfx:analyze
-VFX=finish-vfx ruby scripts/mv.rb --project /absolute/project 'vfx:stills[0,24,120]'
-VFX=finish-vfx ruby scripts/mv.rb --project /absolute/project 'vfx:clip[96,144]'
-VFX=finish-vfx ruby scripts/mv.rb --project /absolute/project vfx:render
-ruby scripts/mv.rb --project /absolute/project 'media:twitter[output/finished.mp4,output/finished_x.mp4]'
-ruby scripts/mv.rb --project /absolute/project 'media:faststart[output/finished.mp4,output/finished_fs.mp4]'
-```
-
-**X/Twitter delivery.** `media:twitter[video,out.mp4]` encodes any source to X's upload spec:
-- MP4, H.264 High@4.2, yuv420p, progressive, square pixels, tagged BT.709 limited range (untagged/BT.601 sources are converted);
-- fits the 16:9 1920x1080, 9:16 1080x1920 or 1:1 1080x1080 box without upscaling; a source within 1% of the ratio (1928x1076 model clips) is fill-cropped to it; rotated phone video and anamorphic pixels are handled;
-- keeps the frame rate up to 60 (higher is capped), closed 1 s GOPs, faststart;
-- CRF 16 with a 24 Mb/s VBV cap (X's maximum is 25). Override with `CRF=`, `MAX_MBPS=` (≤ 25), `TUNE=animation|film|grain`;
-- AAC-LC stereo/mono at 44.1/48 kHz is copied, anything else becomes AAC-LC 48 kHz stereo 256 kb/s; metadata is stripped.
-
-It refuses to overwrite `out`, and prints the result with `mbps`, `fits_free` (≤ 140 s, ≤ 512 MB) and `fits_premium` (≤ 4 h, ≤ 16 GB on web/iOS; Android uploads stop at 10 min). A 1080p60 native render re-encodes transparently (deadstar: PSNR 50 dB, SSIM 0.997, ~3 min for 2 min on 8 cores). `media:faststart` is the lossless alternative when the master is already in spec and only needs its index moved to the front.
-
-`media:montage` tiles frames into a labelled contact strip (columns, tile width) for frame-exact sync review. `audio:transcribe_local` (mlx-whisper; `MV_WHISPER_MODEL`, `MV_WHISPER_LANG`) and `media:stems_local` (Demucs `htdemucs` on MPS; `MV_DEMUCS_MODEL`; writes vocals, no_vocals, drums, bass and other in one pass) run locally through `uv`; their timestamps refer to the whole song. Sung or heavily processed vocals can still hallucinate words; verify by listening.
-
-`audio:excerpt[audio,out.wav,from,seconds,fade_seconds]` cuts the render soundtrack: `seconds` long from `from`, silence-padded if the song is shorter, with an optional fade-out over the last `fade_seconds`; 44.1 kHz stereo. Pass it as `AUDIO=` to `graphics:render` so the video and soundtrack share frame 0.
-
-**Music map (sync timing).** `audio:map` runs `tools/python/music_map.py` (numpy + scipy through `uv`, free, ~2 s per song) and writes four JSON files; the single-purpose tasks write one each. Times are seconds of the input file; `f` is the 24fps frame.
-
-- `beatmap.json`: `beats[{n,t,raw,bar,pos,f}]`, `bars[{bar,t,bpm}]`, `downbeat_phase`, `snare_feel` (backbeat/halftime), `tempo_mode`. Comb-locked tracking follows tempo drift — generated songs often shift a fraction of a BPM at section joins, which a single global grid turns into 100+ ms of error by the second chorus. `MV_TEMPO=constant` forces one straight grid.
-- `hits.json`: `kick`/`snare`/`hat` (and `bass` 808 notes with pitch when a bass stem is given) as `{t,s,db,beat,bar,step}`. `t` is the attack's half-rise point, not the energy peak; cue flashes there. `bars[]` prints 16-step patterns (`x.......x.......`) for reading the groove. Prefer the drums stem; kicks fused with an 808 may read as `bass` notes instead.
-- `vocals.json`: `lines` (lyric lines), `phrases` (words/notes) and `onsets` from a vocal stem, each with bar/step.
-- `sections.json`: per-bar sub/low/mid/high/rms dB and hit counts, grouped into `drop`/`build`/`filtered`/`breakdown`/`groove` (+`vox`) sections with an `energy` 0–1. Labels are heuristics from band presence; confirm by listening.
-
-`media:probe`, `media:sheet`, `media:frame`, `media:cut`, `media:cutout`, `media:sprite_box`, `media:style`, `media:concat`, `media:mux` and `media:youtube` are listed by `-T` with their arguments. Export names denote encoding presets; they do not publish to platforms. For unlisted operations, add an OOP service under `lib/` and a thin registry delegate. Keep backend code under `tools/` and tests in `spec/`.
-
-For detached lettering or debris in an RGBA sprite sequence, run `ruby scripts/mv.rb --project /absolute/project 'media:keep_component[output/raw-sprite,output/clean-sprite,320,400]'`. The seed is an integer pixel coordinate inside the intended subject in **every** input frame. The task preserves its four-connected nonzero-alpha component exactly and clears other alpha; it never expands or bridges components. Output must be a different, new or empty directory. Out-of-bounds or transparent seeds fail the whole sequence without publishing partial output. Touching text remains part of the subject and needs a separate mask; inspect the cleaned motion before use.
-
-The packaging follows [Agent Skills script guidance](https://agentskills.io/skill-creation/using-scripts): relative entry paths, explicit prerequisites, noninteractive arguments, help, meaningful failure codes and compact results. Ruby OOP methods own execution and delegate backend work.
+To add a capability, put a method on a service under `lib/media/`, add a task line to `Toolkit::Operations::TASKS` and its `call` branch, and add a spec.

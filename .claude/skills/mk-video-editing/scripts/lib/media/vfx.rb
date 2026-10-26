@@ -16,13 +16,15 @@ module Media
     CORE_IMAGE = %w[punch zoom shake whip mblur edgeblur glow flash dark rgb glitch tv grain stretch echo bands shockwave lens heat streaks].freeze
     LIGHTS = %w[leak flare glints].freeze
 
-    attr_reader :name, :dir
+    attr_reader :name
 
     def initialize(name = ENV.fetch("VFX", "run4-vfx"))
       @name = name
       @dir = File.join(ROOT, "output", name)
-      FileUtils.mkdir_p(@dir)
     end
+
+    # Created on first use, so building or probing the tool leaves no empty output folder behind.
+    def dir = FileUtils.mkdir_p(@dir).first
 
     def config = @config ||= YAML.safe_load_file(File.join(ROOT, "prompts", name, "cues.yml"))
     def source = File.expand_path(config.fetch("source"), ROOT)

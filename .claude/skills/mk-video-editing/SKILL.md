@@ -1,16 +1,33 @@
 ---
 name: mk-video-editing
-description: Edit supplied camera/phone footage into a finished video — talks, keynotes, interviews, events — with transcript-driven selects, a stabilized virtual camera that tracks and reframes the speaker (wides, punch-ins, pushes, pans) over wide 4K shots, HDR→SDR, deflicker, per-clip color matching, dialogue cleanup and loudness, narration, and native Swift motion-graphics titles. Use when the user supplies video files to cut, reframe, grade, fix or title; not for generating footage.
+description: Edit supplied camera/phone footage into a finished video — talks, keynotes, interviews, events — with transcript-driven selects, a stabilized virtual camera that tracks and reframes the speaker (wides, punch-ins, pushes, pans) over wide 4K shots, HDR→SDR, deflicker, per-clip color matching, dialogue cleanup and loudness, narration, native Swift motion-graphics titles, and optional music beds, sound effects and picture effects. Use when the user supplies video files to cut, reframe, grade, fix or title; not for generating footage.
 license: MIT
 ---
 
 # mk-video-editing
 
-Turn supplied footage into a watchable, homogeneous edit: the right words in the right order, a camera that frames the subject well, a consistent picture, clean and level sound, and tasteful titles. Motion graphics (the bundled Swift renderer) are used for titles, lower thirds and end cards; the music-video storyboard workflow is **not** used — the structure comes from the footage and what is said in it, never from an audio track's beats.
+Turn supplied footage into a watchable, consistent edit: the right words in the right order, a camera that frames the subject well, a consistent picture, clean and level sound, and tasteful titles. The structure comes from the footage and what is said in it.
+
+## What the skill can do
+
+| Need | Tools | Cost | Reference |
+| --- | --- | --- | --- |
+| Word transcripts, filler/false-start/pause detection | `edit:transcribe` (mlx-whisper), `speech:flow` | free, local | [footage-editing.md](references/footage-editing.md) |
+| Stabilize, track the speaker, reframe 4K wides (pushes, punch-ins, pans), HDR→SDR, deflicker, color match, dissolves, jump cuts | `edit:analyze`, `edit:track`, EDL + `medit` (`edit:render`) | free, local | [footage-editing.md](references/footage-editing.md) |
+| Dialogue cleanup, mix, ducking, loudness | `speech:clean` (`ISOLATE=1` Demucs), `speech:mix`, `speech:measure` | free, local | [footage-editing.md](references/footage-editing.md) |
+| Narration | `voice:tts` (ElevenLabs via Fal) | paid, approved | [credentials.md](references/credentials.md) |
+| Titles, lower thirds, end cards (ProRes 4444 alpha) | `mgraphics` JSON scenes, `graphics:render`, templates in `scripts/tools/graphics/examples/` | free, local | [graphics README](scripts/tools/graphics/README.md) |
+| Music bed under the edit | EDL `music` (ducked), `music:score` (ElevenLabs Music via Fal), `audio:analyze` for beat timing | paid only if generated | [finishing.md](references/finishing.md) |
+| Sound effects on titles/transitions | `SoundSynth` (`synth:` whoosh, riser, impact, tick…), `sfx:gen`/`sfx:mix` or EDL `sounds` | free (Stable Audio `prompt:` paid) | [finishing.md](references/finishing.md) |
+| Picture effects (flash, dip, punch, glow, lens, streaks…) | `mvfx` cue sheets, `vfx:stills`/`vfx:render` | free, local | [finishing.md](references/finishing.md) |
+| Delivery encodes | `media:twitter`, `media:youtube`, `media:faststart` | free, local | [tasks.md](references/tasks.md) |
+| Parallel sub-agents on independent jobs | `work:next`/`work:accept`/`work:log`/`work:watch` | free | [tasks.md](references/tasks.md#approval-waves-and-progress) |
+
+Every task with its arguments and options is in [tasks.md](references/tasks.md). Test profiles are in [testing.md](references/testing.md).
 
 ## Execution contract
 
-Designed for Claude Code on macOS 14+ on Apple Silicon (Swift 5.9+, Ruby 3.2+, Bundler, FFmpeg, ImageMagick, uv for local Whisper). Run `doctor` first when a task fails on a missing tool; `setup` builds the Swift tools. **Ruby is the only execution entry layer**: run `ruby "${CLAUDE_SKILL_DIR}/scripts/mv.rb" --project /abs/project 'task[args]'`. Tasks delegate to Ruby services (`lib/media/edit.rb`, `speech.rb`, `guard.rb`) that drive the native editor `medit` (`scripts/tools/edit`) and `mgraphics` (`scripts/tools/graphics`). Add a Ruby method and a thin task when a capability is missing. A project runs **its own copy** of `lib/` and `tools/`: after changing the skill, `rsync` the changed files into the project.
+Designed for Claude Code on macOS 14+ on Apple Silicon (Swift 5.9+, Ruby 3.2+, Bundler, FFmpeg, ImageMagick, uv for local Whisper). Run `doctor` first when a task fails on a missing tool; `setup` builds the Swift tools. **Ruby is the only execution entry layer**: run `ruby "${CLAUDE_SKILL_DIR}/scripts/mv.rb" --project /abs/project 'task[args]'`. Tasks delegate to Ruby services (`lib/media/edit.rb`, `speech.rb`, `guard.rb`, …) that drive the native Swift tools `medit` (`scripts/tools/edit`), `mgraphics` (`scripts/tools/graphics`) and `mvfx` (`scripts/tools/vfx`). Add a Ruby method and a thin task when a capability is missing. A project runs **its own copy** of `lib/` and `tools/`: after changing the skill, `rsync` the changed files into the project.
 
 ### Memory safety (mandatory)
 
@@ -63,13 +80,13 @@ Write `docs/PLAN.md`: selects table (source, in/out at sentence boundaries, cont
 
 ## 4. Build the EDL with a generator script
 
-Write `edit/build_edl.rb` (see [footage-editing.md](references/footage-editing.md) for the full EDL schema and a worked example). Define a shot vocabulary (WIDE zoom≈1.2–1.4, MWIDE fit≈0.4, MED fit≈0.56, PUNCH fit≈0.72 capped by `max_zoom` 3.6) and write camera beats in **source seconds** taken from the transcript: slow pushes over 6–12 s, cut punch-ins on emphasis lines, cut to wide on topic/slide changes, reframe on every jump cut. Per clip: `safe` area (keep distracting foreground out), `deflicker`, `grade` match; one shared `look`. Overlays are ProRes 4444 alpha titles rendered from mgraphics scenes (`edit/titles/*.json`, see the graphics README).
+Write `edit/build_edl.rb` (see [footage-editing.md](references/footage-editing.md) for the full EDL schema and a worked example). Define a shot vocabulary (WIDE zoom≈1.2–1.4, MWIDE fit≈0.4, MED fit≈0.56, PUNCH fit≈0.72 capped by `max_zoom` 3.6) and write camera beats in **source seconds** taken from the transcript: slow pushes over 6–12 s, cut punch-ins on emphasis lines, cut to wide on topic/slide changes, reframe on every jump cut. Per clip: `safe` area (keep distracting foreground out), `deflicker`, `grade` match; one shared `look`. Overlays are ProRes 4444 alpha titles (see Titles below).
 
 Remove words and pauses inside a select with `lib/media/cuts.rb`: `Media::Cuts.pause_cuts` (auto-shorten unnatural pauses), `Media::Cuts.segments` (split the select into jump-cut segments, snap boundaries to the quietest point between words, open each segment on a contrasting framing, keep every zoom ≥ 4.5 s), `Media::Cuts.text` (log what each cut removes to `edit/cuts.txt`). Start and end each select in silence and away from camera handling (check shift velocity near the edges). Worked example in [footage-editing.md](references/footage-editing.md#removing-fillers-false-starts-repeats-and-pauses-jump-cuts).
 
 ## 5. Audio
 
-`speech:clean[audio/raw/A.wav,audio/clean/A.wav]` (PRESET=room: rumble cut, FFT denoise, mud cut, presence, de-ess, gentle expander, leveler; `ISOLATE=1` for local Demucs vocals), narration via `voice:tts` when requested (`MODEL=v4` for Eleven v4), a music bed via `music:score` (ElevenLabs Music v2.5) when requested, then `speech:mix[edit/edl.json,audio/mix.wav]` (clip audio with crossfades on dissolves — `audio_xfade: 0.15` keeps the last word before a 0.6 s dissolve — `audio_duck` under narration, `sounds`, optional `music` with sidechain ducking, two-pass loudnorm to −16 LUFS / −1.5 dBTP).
+`speech:clean[audio/raw/A.wav,audio/clean/A.wav]` (PRESET=room: rumble cut, FFT denoise, mud cut, presence, de-ess, gentle expander, leveler; `ISOLATE=1` for local Demucs vocals). Add narration with `voice:tts` when requested (`MODEL=v4` for Eleven v4). Add a music bed only when the brief asks for one: a supplied track or `music:score`, placed as EDL `music` ([finishing.md](references/finishing.md#soundtrack-music-bed)). Then run `speech:mix[edit/edl.json,audio/mix.wav]`. It mixes the clip audio with crossfades on dissolves (`audio_xfade: 0.15` keeps the last word before a 0.6 s dissolve), `audio_duck` under narration, `sounds`, and `music` with sidechain ducking, then applies two-pass loudnorm to −16 LUFS / −1.5 dBTP.
 
 ## 6. Review, render, deliver
 
@@ -80,6 +97,24 @@ Remove words and pauses inside a select with `lib/media/cuts.rb`: `Media::Cuts.p
 
 Deliver the video, the plan/brief/review docs and a short summary of choices and known issues. Run RSpec profiles from [testing.md](references/testing.md) after changing the toolkit and `swift test` in `tools/graphics` after renderer changes.
 
-## Motion graphics
+## Titles
 
-Titles and graphic inserts use the native renderer's JSON scenes (`scripts/tools/graphics/README.md`, [scene-cookbook.md](references/scene-cookbook.md)). Render with `mgraphics scene.json --out title.mov --codec prores4444 --width 1920 --height 1080 --fps 30 --frames N --supersample 2` (through `Media::Guard`) and place as EDL `overlays`. The older beat-synced music-video workflow and its references ([native-workflow.md](references/native-workflow.md), [planning.md](references/planning.md)) remain available when the user explicitly wants a motion-graphics piece.
+Start from the templates in `scripts/tools/graphics/examples/`: `opening_title.json`, `lower_third.json` and `end_card.json` (1920×1080, AvenirNext, one accent color). Copy them to `edit/titles/`, change the text and timing, or generate them from `edit/make_titles.rb` when there are several. Web-check names, roles and event facts.
+
+1. Render stills with `ONLY=` over a frame of the shot (`PLATE=`) and check legibility, the safe margin and accents.
+2. Render `CODEC=prores4444 SUPERSAMPLE=2 graphics:render[edit/titles/x.json,edit/titles/x.mov,frames,1920,1080,fps]` at the edit's fps.
+3. Place it as an EDL `overlays` entry, darkening or blurring the plate under an opening card with camera `dim`/`blur`.
+
+The scene format (nodes, tracks, easing, glow, fonts) is in the [graphics README](scripts/tools/graphics/README.md). After renderer changes, run `swift test` in `scripts/tools/graphics` and compare old and new title renders byte for byte.
+
+## Finishing (optional)
+
+A music bed, sound effects and picture effects are optional passes, described in [finishing.md](references/finishing.md):
+- the bed goes into `speech:mix` before the render;
+- SFX (`sfx.yml`) and VFX (`cues.yml`) run on the rendered master and always write a new file.
+
+Use them when the brief asks for a promo or recap feel. Clean talk edits rarely need them.
+
+## Parallel work
+
+For long edits, split independent jobs (titles, narration lines, review stills per section, QA transcripts) into `config/production.json` with their `depends`. Hand them to sub-agents through `work:next`, have them report with `work:log`, and accept each one after review (`work:accept`). Sub-agents may write scenes, scripts and docs in parallel. **Heavy media jobs (medit, mgraphics/mvfx encodes, Demucs) still run one at a time** (memory safety above).

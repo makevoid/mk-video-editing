@@ -1,15 +1,9 @@
 require_relative "spec_helper"
 RSpec.describe "Swift VFX end to end", :swift do
-  it "applies a cued effect to a character scene, preserves outside frames and audio" do
+  it "applies cued effects to a clip, preserves outside frames and audio" do
     raise "Swift VFX requires macOS 14+ (use PROFILE=media/core elsewhere)" unless RUBY_PLATFORM.include?("darwin")
-    source = video
-      sprite = character
-      meta = py.cutout(sprite, file("sprites"), "green")
-      meta["dir"] = file("sprites").delete_prefix("#{RT}/")
-      json(file("clips.json"), hero: meta)
-      native_scene(file("scene.json"), clip: "hero", background: "#244060", height: 180)
-      Media::Anim.new.render(file("scene.json"),file("frames"),width:320,height:180,fps:24,frames:48,data:{clips:file("clips.json")})
-      source = ff.overlay_frames(source,file("frames"),file("composed.mp4"),fps:24)
+    plate = magick.run("magick", "-size", "320x180", "xc:#244060", "-fill", "#e02040", "-draw", "rectangle 128,36 192,144", file("plate.png")) && file("plate.png")
+    source = video(image: plate, seconds: 2)
     name = "e2e-vfx-#{Process.pid}"
     dir = File.join(RT, "prompts", name); FileUtils.mkdir_p(dir)
     config = {"source" => source, "out" => file("effect.mp4"), "cues" => [{"fx" => "dark", "f" => 12, "dur" => 6, "hold" => 3, "amt" => 0.9}, {"fx" => "flare", "f" => 36, "dur" => 3, "amt" => 1, "x" => 0.5, "y" => 0.5}]}
