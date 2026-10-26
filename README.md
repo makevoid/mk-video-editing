@@ -1,6 +1,6 @@
-# claude-edit
+# mk-video-editing
 
-**mk-video-editing** — a [Claude Code](https://claude.com/claude-code) skill and plugin that edits supplied camera or
+A [Claude Code](https://claude.com/claude-code) skill and plugin that edits supplied camera or
 phone footage into a finished video: talks, keynotes, interviews, events.
 
 You give Claude the clips and a short brief ("a 4-minute excerpt of this keynote, with an opening title and
@@ -54,7 +54,7 @@ ruby -v                         # 3.2 or newer
 ### As a Claude Code plugin (recommended)
 
 ```sh
-claude plugin marketplace add makevoid/claude-edit
+claude plugin marketplace add makevoid/mk-video-editing
 claude plugin install mk-video-editing@makevoid-video-editing --scope user
 ```
 
@@ -71,8 +71,8 @@ Clone the repository and either use it as your editing workspace (Claude Code pi
 `.claude/skills/`, and `projects/` is git-ignored), or link it into your personal skills folder:
 
 ```sh
-git clone https://github.com/makevoid/claude-edit.git
-cd claude-edit
+git clone https://github.com/makevoid/mk-video-editing.git
+cd mk-video-editing
 ln -s "$PWD/.claude/skills/mk-video-editing" ~/.claude/skills/mk-video-editing   # optional: every session
 
 rake setup      # gems, Python venv, build medit / mgraphics / mvfx
