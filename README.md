@@ -102,28 +102,32 @@ clips before importing; `init` reports the conflicting paths and leaves the proj
 
 ### Running the tools directly
 
-Everything goes through one Ruby entry point:
+Everything goes through one Ruby entry point. Set the script path in this function to your installed skill;
+the function works in default zsh and Bash and preserves arguments containing spaces:
 
 ```sh
-MV="ruby /abs/path/to/.claude/skills/mk-video-editing/scripts/mv.rb"
-$MV init --project /abs/projects/my-talk --media /abs/clip1.MOV --media /abs/clip2.MOV --prompt-file brief.md
-cd /abs/projects/my-talk
-$MV --project . setup
+mv_edit() {
+  ruby "/abs/path/to/.claude/skills/mk-video-editing/scripts/mv.rb" "$@"
+}
 
-$MV --project . 'edit:transcribe[analysis/transcripts,source/clip1.MOV]'
-VERBATIM=1 $MV --project . 'edit:transcribe[analysis/transcripts_verbatim,source/clip1.MOV]'
-REGION=0,0,1,0.62 DETECT_REGION=0.15,0.3,0.85,0.8 $MV --project . 'edit:analyze[source/clip1.MOV,analysis/clip1.json]'
-SPACE=frame $MV --project . 'edit:track[analysis/clip1.json,analysis/clip1.track.json]'
-$MV --project . 'speech:clean[audio/raw/clip1.wav,audio/clean/clip1.wav]'
-$MV --project . 'speech:flow[analysis/transcripts_verbatim/clip1.json,audio/clean/clip1.wav,analysis/flow/clip1.json]'
+mv_edit init --project /abs/projects/my-talk --media /abs/clip1.MOV --media /abs/clip2.MOV --prompt-file brief.md
+cd /abs/projects/my-talk
+mv_edit --project . setup
+
+mv_edit --project . 'edit:transcribe[analysis/transcripts,source/clip1.MOV]'
+VERBATIM=1 mv_edit --project . 'edit:transcribe[analysis/transcripts_verbatim,source/clip1.MOV]'
+REGION=0,0,1,0.62 DETECT_REGION=0.15,0.3,0.85,0.8 mv_edit --project . 'edit:analyze[source/clip1.MOV,analysis/clip1.json]'
+SPACE=frame mv_edit --project . 'edit:track[analysis/clip1.json,analysis/clip1.track.json]'
+mv_edit --project . 'speech:clean[audio/raw/clip1.wav,audio/clean/clip1.wav]'
+mv_edit --project . 'speech:flow[analysis/transcripts_verbatim/clip1.json,audio/clean/clip1.wav,analysis/flow/clip1.json]'
 
 ruby edit/build_edl.rb                                   # your generator writes edit/edl.json
-$MV --project . 'speech:mix[edit/edl.json,audio/mix.wav]'
-DEBUG=1 $MV --project . 'edit:stills[edit/edl.json,edit/review/v1,10,42,95]'
-$MV --project . 'edit:render[edit/edl.json,output/final_v1.mp4]'
+mv_edit --project . 'speech:mix[edit/edl.json,audio/mix.wav]'
+DEBUG=1 mv_edit --project . 'edit:stills[edit/edl.json,edit/review/v1,10,42,95]'
+mv_edit --project . 'edit:render[edit/edl.json,output/final_v1.mp4]'
 ```
 
-`$MV -T` lists every task with its arguments. The most used:
+`mv_edit -T` lists every task with its arguments. The most used:
 
 | Task | Purpose |
 |---|---|
@@ -194,6 +198,8 @@ existing one.
 Contributions are welcome — camera and framing heuristics, grading and deflicker, speech-flow detection, title
 templates, and lessons from real edits (as generic notes, without your footage). Please run `PROFILE=core rake test`
 and, for Swift changes, the swift profile before opening a pull request.
+
+Release follow-ups and validation notes are tracked in [TODO.md](TODO.md).
 
 ## Network use and privacy
 
