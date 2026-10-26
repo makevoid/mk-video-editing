@@ -1,109 +1,109 @@
 # mk-video-editing
 
-A [Claude Code](https://claude.com/claude-code) skill and plugin that edits supplied camera or
-phone footage into a finished video: talks, keynotes, interviews, events.
+**Turn raw talk, keynote, interview and event footage into a finished video by describing the edit to
+[Claude Code](https://claude.com/claude-code).**
 
-You give Claude the clips and a short brief ("a 4-minute excerpt of this keynote, with an opening title and
-narration"). Claude transcribes the footage, picks the selects, plans the edit with you, then builds and renders it with
-native macOS tools: a virtual camera that reframes the speaker inside wide 4K shots, HDR→SDR, deflicker, color matching,
-cleaned and normalized dialogue, narration and motion-graphics titles. Everything runs locally except optional paid
-narration and music.
-
-No footage, music or fonts are bundled: you bring the media, and fonts are copied from your Mac per project.
-
-[Skill instructions](.claude/skills/mk-video-editing/SKILL.md) ·
-[Footage editing reference](.claude/skills/mk-video-editing/references/footage-editing.md) ·
-[Finishing: music, SFX, VFX](.claude/skills/mk-video-editing/references/finishing.md) ·
-[Task reference](.claude/skills/mk-video-editing/references/tasks.md) ·
-[Testing](.claude/skills/mk-video-editing/references/testing.md)
-
-## What it does
-
-| Area | Functionality |
-|---|---|
-| **Selects** | Local word-level transcripts (mlx-whisper), selects cut at sentence boundaries, an approved plan (`docs/PLAN.md`) before any rendering |
-| **Speech flow** | `speech:flow` detects fillers (um, uh), untranscribed hums, repeats, false starts and unnatural pauses from the audio itself, each with a proposed cut; `Media::Cuts` turns chosen cuts into jump cuts that land in the silence between words |
-| **Virtual camera** | Vision-tracked speaker; wides, medium shots, punch-ins, slow pushes and pans written as camera beats; each jump cut opens on a contrasting framing; zooms never faster than 4.5 s; `safe` areas keep foreground heads out of frame |
-| **Picture** | HLG/HDR → Rec.709 tone mapping, per-tile deflicker of LED/mains ripple, per-clip exposure/white-balance match, one shared look; optional stabilization (off for phone footage that the camera already stabilized) |
-| **Audio** | Dialogue cleanup (rumble, denoise, de-ess, leveler, optional Demucs isolation), timeline mix with crossfades and ducking, two-pass loudness to −16 LUFS / −1.5 dBTP, optional ElevenLabs narration and music bed |
-| **Graphics** | Native Swift motion-graphics renderer (`mgraphics`) for opening titles, lower thirds and end cards, rendered as ProRes 4444 alpha overlays; editable JSON templates included |
-| **Finishing** | Optional music bed (supplied or ElevenLabs Music, beat analysis for timing), procedural sound effects (whoosh, riser, impact, tick…), Core Image / Metal picture effects (flash, dip, punch, glow, lens, streaks) |
-| **Review** | Debug stills with crop/subject/safe-area overlays, contact sheets, half-res previews, QA re-transcription of the mix and the final render |
-| **Delivery** | H.264/HEVC masters, X/Twitter and YouTube upload encodes |
-
-## Requirements
-
-- macOS 14+ on **Apple Silicon** (VideoToolbox, Vision, Metal, mlx-whisper)
-- Xcode or the command line tools (Swift 5.9+): `xcode-select --install`
-- Ruby 3.2+ with Bundler — the Ruby bundled with macOS is too old
-- FFmpeg, ImageMagick, Python 3 and [uv](https://docs.astral.sh/uv/) (Whisper, Demucs and the speech-flow detector run
-  in ephemeral uv environments, downloaded on first use)
-- 16 GB RAM or more; 4K HDR sources are decoded one heavy job at a time (see [Memory safety](#memory-safety))
-
-With [Homebrew](https://brew.sh), from a clone of this repository:
-
-```sh
-brew bundle                     # ruby, ffmpeg, imagemagick, python, uv (see Brewfile)
-xcode-select --install          # if Swift is not installed yet
-
-# Homebrew Ruby is keg-only: put it first in PATH (add this line to ~/.zshrc)
-export PATH="$(brew --prefix ruby)/bin:$PATH"
-ruby -v                         # 3.2 or newer
-```
-
-## Install
-
-### As a Claude Code plugin (recommended)
-
-```sh
-claude plugin marketplace add makevoid/mk-video-editing
-claude plugin install mk-video-editing@makevoid-video-editing --scope user
-```
-
-Start Claude Code in any folder that holds (or can reach) your footage and invoke `/mk-video-editing:mk-video-editing`,
-or just describe the edit — the skill triggers when you supply video files to cut. The first project runs `setup`, which
-installs gems and builds the three Swift tools (about a minute on a cold cache).
-
-Optional paid narration/music: `/plugin configure mk-video-editing` and set the **Fal API key**. It is passed only to
-the bundled MCP server; see [credentials](.claude/skills/mk-video-editing/references/credentials.md).
-
-### As a standalone skill
-
-Clone the repository and either use it as your editing workspace (Claude Code picks the skill up from
-`.claude/skills/`, and `projects/` is git-ignored), or link it into your personal skills folder:
-
-```sh
-git clone https://github.com/makevoid/mk-video-editing.git
-cd mk-video-editing
-ln -s "$PWD/.claude/skills/mk-video-editing" ~/.claude/skills/mk-video-editing   # optional: every session
-
-rake setup      # gems, Python venv, build medit / mgraphics / mvfx
-rake doctor     # prerequisite check (STRICT=1 rake doctor fails on anything missing)
-```
-
-For paid narration in standalone use, export `FAL_AI_API_KEY` in the shell that starts Claude Code.
-
-## Usage
-
-Describe the edit in plain language, with absolute paths to the clips:
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-black)
+![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)
+![Ruby](https://img.shields.io/badge/Ruby-3.2%2B-CC342D?logo=ruby&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > Edit the four clips in `~/Movies/conference/` into a 5-minute excerpt of the talk. Opening title with the event name,
 > talk title and speaker; a lower third when they first appear. Clean up the audio, remove the ums and long pauses, and
 > keep the camera off the audience on the left.
 
-Claude follows the workflow in `SKILL.md`: intake → analysis → plan for your approval → EDL generator → audio →
-review stills → render → QA. Each project is a self-contained folder (e.g. `projects/my-talk/`) holding symlinked
-sources, analysis, the EDL generator `edit/build_edl.rb`, docs (`BRIEF.md`, `PLAN.md`, `REVIEW.md`) and outputs. Your
-original media is never copied or modified. Revisions are new versions (`final_v2.mp4`, `final_v3.mp4`…); delivered
-masters are never overwritten.
+Claude transcribes the footage, picks selects at sentence boundaries, shows you a plan, then builds and renders the
+edit with native macOS tools — a tracking virtual camera inside wide 4K shots, HDR→SDR, deflicker, color matching,
+dialogue cleanup and Swift motion-graphics titles.
 
-Source filenames must be unique, including case differences. If two cameras produced the same filename, rename the
-clips before importing; `init` reports the conflicting paths and leaves the project untouched.
+- **Local by default** — transcription, analysis, audio and rendering run on your Mac; footage never leaves it.
+- **Non-destructive** — sources are symlinked, never copied or modified; every revision is a new `final_vN.mp4`.
+- **Reviewable** — plain JSON EDLs, debug stills with framing overlays, and QA re-transcription of the final mix.
 
-### Running the tools directly
+## Quick start
 
-Everything goes through one Ruby entry point. Set the script path in this function to your installed skill;
-the function works in default zsh and Bash and preserves arguments containing spaces:
+```sh
+brew bundle                                   # ruby, ffmpeg, imagemagick, python, uv
+export PATH="$(brew --prefix ruby)/bin:$PATH" # Homebrew Ruby is keg-only; add to ~/.zshrc
+
+claude plugin marketplace add makevoid/mk-video-editing
+claude plugin install mk-video-editing@makevoid-video-editing --scope user
+```
+
+Open Claude Code next to your footage and describe the edit (or run `/mk-video-editing:mk-video-editing`). The first
+project installs gems and builds the Swift tools — about a minute on a cold cache.
+
+## Features
+
+| | |
+|---|---|
+| **Selects** | Word-level local transcripts (mlx-whisper), sentence-boundary cuts, an approved `PLAN.md` before any render |
+| **Speech flow** | Detects ums, hums, repeats, false starts and long pauses from the audio; jump cuts land in the silence between words |
+| **Virtual camera** | Vision speaker tracking; wides, punch-ins, pushes and pans as camera beats; `safe` areas keep foreground heads out |
+| **Picture** | HLG/HDR → Rec.709, per-tile LED/mains deflicker, per-clip exposure and white-balance match, optional stabilization |
+| **Audio** | Rumble/denoise/de-ess/leveler, optional Demucs isolation, ducking and crossfades, two-pass −16 LUFS / −1.5 dBTP |
+| **Graphics** | Native Swift renderer for titles, lower thirds and end cards (ProRes 4444 alpha), editable JSON templates |
+| **Finishing** | Optional music bed with beat analysis, procedural SFX, Core Image / Metal effects |
+| **Delivery** | H.264/HEVC masters, X/Twitter and YouTube encodes |
+
+Optional paid extras — ElevenLabs narration and music via Fal — run only on explicit request.
+
+## How it works
+
+```
+intake → transcribe & analyze → plan (you approve) → EDL generator → audio → review stills → render → QA
+```
+
+Each edit is a self-contained project folder:
+
+```
+projects/my-talk/
+  source/          symlinks to your clips
+  analysis/        transcripts, camera tracks, flicker and color stats, speech-flow reports
+  audio/           raw, cleaned and mixed dialogue
+  edit/            build_edl.rb → edl.json, review stills
+  docs/            BRIEF.md, PLAN.md, REVIEW.md
+  output/          final_v1.mp4, final_v2.mp4, …
+```
+
+Under the hood: a Ruby CLI (`scripts/mv.rb`) orchestrates three Swift tools — `medit` (analysis, virtual camera, grade,
+render), `mgraphics` (titles) and `mvfx` (effects) — plus FFmpeg and Python helpers run in ephemeral uv environments.
+
+## Requirements
+
+- macOS 14+ on Apple Silicon, 16 GB RAM or more
+- Swift 5.9+ (`xcode-select --install`)
+- Ruby 3.2+ (the system Ruby is too old), FFmpeg, ImageMagick, Python 3, [uv](https://docs.astral.sh/uv/) — all in the
+  [Brewfile](Brewfile)
+
+No footage, music or fonts are bundled; fonts are copied from your Mac per project. Source filenames must be unique
+(case-insensitively) — `init` reports clashes and leaves the project untouched.
+
+<details>
+<summary><b>Standalone skill (without the plugin)</b></summary>
+
+Use the clone as your editing workspace (`projects/` is git-ignored), or link the skill into every session:
+
+```sh
+git clone https://github.com/makevoid/mk-video-editing.git && cd mk-video-editing
+ln -s "$PWD/.claude/skills/mk-video-editing" ~/.claude/skills/mk-video-editing   # optional
+
+rake setup      # gems, Python venv, build medit / mgraphics / mvfx
+rake doctor     # prerequisite check (STRICT=1 fails on anything missing)
+```
+
+For paid narration, export `FAL_AI_API_KEY` in the shell that starts Claude Code. With the plugin, set the key via
+`/plugin configure mk-video-editing` instead; it is passed only to the bundled MCP server
+([credentials](.claude/skills/mk-video-editing/references/credentials.md)).
+
+</details>
+
+<details>
+<summary><b>Running the tools directly</b></summary>
+
+Everything goes through one Ruby entry point. Point this function at your installed skill (works in zsh and Bash, keeps
+arguments with spaces intact):
 
 ```sh
 mv_edit() {
@@ -127,87 +127,90 @@ DEBUG=1 mv_edit --project . 'edit:stills[edit/edl.json,edit/review/v1,10,42,95]'
 mv_edit --project . 'edit:render[edit/edl.json,output/final_v1.mp4]'
 ```
 
-`mv_edit -T` lists every task with its arguments. The most used:
+`mv_edit -T` lists every task. The most used:
 
 | Task | Purpose |
 |---|---|
 | `edit:transcribe` | Local word transcripts; `VERBATIM=1` keeps fillers |
 | `edit:analyze` | Camera path, flicker tiles, color stats and people detection per source |
 | `edit:track` | Speaker track (`SPACE=frame` for unstabilized renders, `SEED=x,y` to pick the speaker) |
-| `speech:flow` | Filler / false start / repeat / pause detector with proposed cuts and a readable `.txt` |
+| `speech:flow` | Filler / false start / repeat / pause detector with proposed cuts |
 | `speech:clean`, `speech:mix`, `speech:measure` | Dialogue cleanup, timeline mix + loudness, measurements |
-| `voice:tts`, `music:score` | Narration line, music bed (paid, only on explicit request) |
-| `graphics:render`, `graphics:preview` | Titles from JSON scenes (ProRes 4444 alpha), fast drafts |
-| `sfx:gen`/`sfx:mix`, `vfx:stills`/`vfx:render` | Sound effects and picture effects from cue sheets |
+| `voice:tts`, `music:score` | Narration line, music bed (paid, explicit request only) |
+| `graphics:render`, `graphics:preview` | Titles from JSON scenes, fast drafts |
+| `sfx:gen`/`sfx:mix`, `vfx:stills`/`vfx:render` | Sound and picture effects from cue sheets |
 | `edit:stills`, `edit:sheet`, `edit:preview` | Review stills, contact sheets, half-res drafts |
 | `edit:render` | Final render of an EDL |
 | `media:twitter`, `media:youtube` | Upload encodes |
 
-The EDL schema (clips, camera beats, `safe`, `grade`, `deflicker`, `stabilize`, `audio_duck`, `audio_xfade`, overlays,
-sounds) and a worked generator example are in
+The EDL schema and a worked generator example are in
 [`footage-editing.md`](.claude/skills/mk-video-editing/references/footage-editing.md).
+
+</details>
 
 ## Memory safety
 
-4K HDR decoding keeps frames in a system decoder process outside the job's own memory. On a 16 GB Mac, running several
-heavy jobs at once can freeze the machine. The skill therefore runs one heavy job at a time, and every native render goes
-through `Media::Guard`, which watches job + decoder memory and system free memory and stops the job before it gets
-dangerous (`MEDIT_MAX_FOOTPRINT_MB`, default 3500; `MEDIT_MIN_FREE_PCT`, default 30). A typical 1080p render from 4K
-sources peaks around 2–2.5 GB. Close memory-hungry apps before long renders.
+4K HDR frames are decoded in a system process outside the job's own memory, so parallel heavy jobs can freeze a 16 GB
+Mac. The skill runs one heavy job at a time, and every native render goes through `Media::Guard`, which stops the job
+before memory gets dangerous (`MEDIT_MAX_FOOTPRINT_MB`, default 3500; `MEDIT_MIN_FREE_PCT`, default 30). A 1080p render
+from 4K sources typically peaks at 2–2.5 GB.
 
-## Layout
+## Privacy
+
+Footage stays on your Mac. Setup downloads gems and Python packages, and the first transcription or Demucs run
+downloads model weights. Only explicitly requested Fal tasks (narration, music, prompt-based SFX) send text prompts out,
+and they are billed. No telemetry. Normal Claude conversation and tool-result handling still applies.
+
+## Development
+
+```sh
+PROFILE=core  rake test     # contracts, CLI, cut helpers — fast, no media
+PROFILE=media rake test     # real FFmpeg / ImageMagick / Python
+PROFILE=swift rake test     # native renderers
+rake test                   # everything
+claude --plugin-dir .       # try local plugin changes
+```
+
+Tests make no paid calls and need no footage; fixtures are synthesized. Projects get their own copy of `lib/` and
+`tools/` at `init`, so after changing the skill, start a new project or rsync the changes in.
+
+<details>
+<summary><b>Repository layout</b></summary>
 
 ```
-.claude-plugin/             plugin.json + marketplace.json (Claude Code plugin install)
+.claude-plugin/             plugin.json + marketplace.json
 .claude/skills/mk-video-editing/
   SKILL.md                  instructions Claude follows
-  references/               footage editing, finishing (music/SFX/VFX), tasks, testing, credentials
+  references/               footage editing, finishing, tasks, testing, credentials
   scripts/mv.rb             Ruby CLI entry point (rake tasks)
   scripts/mcp.rb            MCP server for paid Fal tasks in plugin sessions
-  scripts/lib/media/        Ruby services: edit, speech, cuts, guard, ffmpeg, graphics, sfx, vfx
+  scripts/lib/media/        edit, speech, cuts, guard, ffmpeg, graphics, sfx, vfx
   scripts/lib/fal/          Fal client + ElevenLabs TTS/Music and Stable Audio SFX adapters
-  scripts/lib/workflow/     plan approval, dependency waves for parallel sub-agents, progress journal
-  scripts/tools/edit/       medit — Swift footage editor (analysis, virtual camera, deflicker, grade, render)
-  scripts/tools/graphics/   mgraphics — Swift motion-graphics renderer, title templates in examples/
+  scripts/lib/workflow/     plan approval, parallel sub-agent waves, progress journal
+  scripts/tools/edit/       medit — Swift footage editor
+  scripts/tools/graphics/   mgraphics — Swift motion-graphics renderer + title templates
   scripts/tools/vfx/        mvfx — Swift video effects
-  scripts/tools/python/     speech flow, local transcription, Demucs stems, beats/energy, cut detection, SFX mix
+  scripts/tools/python/     speech flow, transcription, Demucs, beats, cut detection, SFX mix
   scripts/spec/             RSpec suite
 Brewfile                    command-line prerequisites
 Rakefile                    rake setup / doctor / test
 ```
 
-The motion-graphics renderer and VFX come from
-[motion-graphics-music-video-skill-noimage](https://github.com/makevoid/motion-graphics-music-video-skill-noimage),
-trimmed to what footage editing uses. Use that skill for beat-synced music videos.
+</details>
 
-## Development and tests
+Contributions welcome — framing heuristics, grading and deflicker, speech-flow detection, title templates, and lessons
+from real edits (as generic notes, without your footage). Run `PROFILE=core rake test`, plus the swift profile for Swift
+changes, before opening a PR. Release follow-ups live in [TODO.md](TODO.md).
 
-```sh
-rake test                                  # everything (needs the full macOS toolchain)
-PROFILE=core  rake test                    # contracts, CLI, cut helpers — fast, no media
-PROFILE=media rake test                    # real FFmpeg / ImageMagick / Python
-PROFILE=swift rake test                    # native renderers
-(cd .claude/skills/mk-video-editing/scripts/tools/graphics && swift test)
-claude --plugin-dir .                      # try local plugin changes
-```
+**Docs:** [SKILL.md](.claude/skills/mk-video-editing/SKILL.md) ·
+[Footage editing](.claude/skills/mk-video-editing/references/footage-editing.md) ·
+[Finishing](.claude/skills/mk-video-editing/references/finishing.md) ·
+[Tasks](.claude/skills/mk-video-editing/references/tasks.md) ·
+[Testing](.claude/skills/mk-video-editing/references/testing.md)
 
-No test makes paid calls or needs footage; fixtures are synthesized. Projects run their own copy of `lib/` and
-`tools/` (made at `init`), so after changing the skill, start a new project or rsync the changed files into the
-existing one.
-
-Contributions are welcome — camera and framing heuristics, grading and deflicker, speech-flow detection, title
-templates, and lessons from real edits (as generic notes, without your footage). Please run `PROFILE=core rake test`
-and, for Swift changes, the swift profile before opening a pull request.
-
-Release follow-ups and validation notes are tracked in [TODO.md](TODO.md).
-
-## Network use and privacy
-
-Transcription, analysis, editing, audio processing and rendering run locally; your footage never leaves the Mac by
-default. Setup downloads gems and Python packages (the Swift tools have no third-party dependencies); the first transcription or Demucs run
-downloads model weights. Explicitly requested Fal tasks (narration, music bed, prompt-based sound effects) send their text
-prompts to Fal and incur charges. There is no telemetry.
-Normal Claude conversation and tool-result handling still applies.
+The motion-graphics renderer and VFX are trimmed from
+[motion-graphics-music-video-skill-noimage](https://github.com/makevoid/motion-graphics-music-video-skill-noimage) —
+use that for beat-synced music videos.
 
 ## License
 
