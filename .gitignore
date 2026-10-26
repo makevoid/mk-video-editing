@@ -1,0 +1,42 @@
+# Skill repo: track only .claude/skills/mk-video-editing (plus repo metadata).
+
+# Edit projects (footage, renders, analysis) and other skills
+projects/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/mk-video-editing/
+
+# Build products, caches and scratch output inside the skill
+.build/
+.swiftpm/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.bundle/
+.claude/skills/mk-video-editing/scripts/tmp/
+.claude/skills/mk-video-editing/scripts/output/
+.claude/skills/mk-video-editing/scripts/prompts/
+# Fonts copied from the Mac by fonts:copy (not redistributable)
+.claude/skills/mk-video-editing/scripts/tools/graphics/fonts/
+
+# Media
+*.mp4
+*.mov
+*.MOV
+*.m4a
+*.wav
+*.mp3
+*.aac
+*.m4v
+*.mkv
+*.mxf
+*.jpg
+*.png
+!.claude/skills/mk-video-editing/assets/*.png
+
+# Secrets and OS files
+.env
+.env.*
+.DS_Store

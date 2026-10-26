@@ -1,0 +1,15 @@
+output/
+tmp/
+specs/
+node_modules/
+.venv/
+tools/vfx/.build/
+tools/graphics/.build/
+.bundle/
+audio/
+.env
+
+**/__pycache__/
+*.pyc
+**/prompts/e2e-*/
+**/prompts/live-vfx-*/

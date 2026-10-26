@@ -1,0 +1,15 @@
+{
+  "name": "makevoid-video-editing",
+  "description": "Native macOS footage editing plugin by makevoid.",
+  "owner": {
+    "name": "makevoid",
+    "url": "https://github.com/makevoid"
+  },
+  "plugins": [
+    {
+      "name": "mk-video-editing",
+      "source": "./",
+      "description": "Edit talks, keynotes, interviews and event footage on macOS with native Swift tools and local transcription."
+    }
+  ]
+}

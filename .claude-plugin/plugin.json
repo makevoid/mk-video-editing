@@ -1,0 +1,43 @@
+{
+  "name": "mk-video-editing",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Edit camera and phone footage into finished videos on macOS: transcript-driven selects, a tracking virtual camera, HDR to SDR, deflicker, color matching, dialogue cleanup and native Swift titles.",
+  "author": {
+    "name": "makevoid",
+    "url": "https://github.com/makevoid"
+  },
+  "homepage": "https://github.com/makevoid/claude-edit#readme",
+  "repository": "https://github.com/makevoid/claude-edit",
+  "keywords": [
+    "video-editing",
+    "footage",
+    "macos",
+    "swift",
+    "virtual-camera",
+    "transcription"
+  ],
+  "skills": [
+    "./.claude/skills/"
+  ],
+  "userConfig": {
+    "FAL_AI_API_KEY": {
+      "type": "string",
+      "title": "Fal API key",
+      "description": "Optional Fal API key for explicitly requested ElevenLabs narration and music beds. Editing, transcription and rendering run locally and need no key.",
+      "sensitive": true,
+      "required": false
+    }
+  },
+  "mcpServers": {
+    "mk-video-editing": {
+      "command": "ruby",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/.claude/skills/mk-video-editing/scripts/mcp.rb"
+      ],
+      "env": {
+        "FAL_AI_API_KEY_PLUGIN": "${user_config.FAL_AI_API_KEY}"
+      }
+    }
+  }
+}

@@ -1,0 +1,412 @@
+import XCTest
+import CoreGraphics
+import CoreImage
+import AVFoundation
+import Metal
+@testable import MotionGraphics
+
+final class GraphicsTests: XCTestCase {
+    func pixel(_ canvas: Canvas, _ x: Int, _ y: Int) -> [UInt8] {
+        let ptr = canvas.context.data!.assumingMemoryBound(to:UInt8.self)
+        let index = y*canvas.context.bytesPerRow+x*4
+        return (0..<4).map { ptr[index+$0] }
+    }
+    func temp() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("graphics-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at:url,withIntermediateDirectories:true)
+        addTeardownBlock { try? FileManager.default.removeItem(at:url) }; return url
+    }
+    func testPremultipliedAlphaAndTopLeftOrigin() throws {
+        let c = try Canvas(width:32,height:32); c.clear(); c.style = Style(fill:Color(1,0,0,0.5)); c.rect(0,0,10,10)
+        XCTAssertEqual(pixel(c,5,5)[0],128,accuracy:1); XCTAssertEqual(pixel(c,5,5)[3],128,accuracy:1)
+        XCTAssertEqual(pixel(c,5,25)[3],0)
+    }
+    func testImageOrientationAndPNGAlphaRoundTrip() throws {
+        let source = try Canvas(width:16,height:16); source.clear(); source.style.fill = Color(1,0,0); source.rect(0,0,16,4)
+        let file = try temp().appendingPathComponent("alpha.png"); try source.writePNG(to:file)
+        let result = try Canvas(width:16,height:16); result.image(try ImageAsset(url:file).image,in:CGRect(x:0,y:0,width:16,height:16))
+        XCTAssertEqual(pixel(result,2,2),[255,0,0,255]); XCTAssertEqual(pixel(result,2,14)[3],0)
+    }
+    func testIsolatedGroupOpacityAndNestedTransforms() throws {
+        let scene = Scene(), group = Group(); group.opacity = 0.5; group.position = CGPoint(x:3,y:4)
+        try scene.root.add(group)
+        for x in [0.0,5.0] { let n = ShapeNode(.rect(CGRect(x:x,y:0,width:10,height:10))); try group.add(n) }
+        let c = try Canvas(width:32,height:32); try scene.draw(on:c,at:FrameTime(frame:0,fps:24))
+        XCTAssertEqual(pixel(c,5,6)[3],128,accuracy:1); XCTAssertEqual(pixel(c,10,6)[3],128,accuracy:1)
+        XCTAssertEqual(pixel(c,1,1)[3],0)
+    }
+    func testStateRestoreOnError() throws {
+        let c = try Canvas(width:16,height:16)
+        XCTAssertThrowsError(try c.withState { c in c.translate(10,10); c.style.fill = .black; throw GraphicsError.invalid("fixture") })
+        XCTAssertEqual(c.style.fill,.white); c.rect(0,0,3,3); XCTAssertEqual(pixel(c,1,1),[255,255,255,255])
+    }
+    func testClippingAndContours() throws {
+        let c = try Canvas(width:32,height:32), path = Path.rect(CGRect(x:0,y:0,width:30,height:30))
+        path.cgPath.addRect(CGRect(x:10,y:10,width:10,height:10)); c.style.evenOdd = true; c.draw(path)
+        XCTAssertEqual(pixel(c,4,4)[3],255); XCTAssertEqual(pixel(c,15,15)[3],0)
+    }
+    func testSceneRejectsCyclesAndDoubleParents() throws {
+        let a = Group(), b = Group(), c = Group(); try a.add(b)
+        XCTAssertThrowsError(try b.add(a)); XCTAssertThrowsError(try c.add(b)); a.remove(b); XCTAssertNoThrow(try c.add(b))
+    }
+    func testTracksSeekRepeatAndValidation() throws {
+        let t = try Track([Keyframe(0,0),Keyframe(1,10),Keyframe(2,20)],repeatDuration:3)
+        XCTAssertEqual(t.value(at:1.5),15); XCTAssertEqual(t.value(at:0.5),5); XCTAssertEqual(t.value(at:3.5),5)
+        XCTAssertEqual(t.value(at:-1),0); XCTAssertThrowsError(try Track([])); XCTAssertThrowsError(try Track([Keyframe(1,0),Keyframe(1,2)]))
+    }
+    func testSparseFramesEqualSequentialRender() throws {
+        let scene = Scene(), box = ShapeNode(.rect(CGRect(x:0,y:0,width:4,height:4)))
+        box.tracks["x"] = try Track([Keyframe(0,0),Keyframe(1,24)]); try scene.root.add(box)
+        let a = try Canvas(width:32,height:16), b = try Canvas(width:32,height:16)
+        for f in 0...12 { try scene.draw(on:a,at:FrameTime(frame:f,fps:24)) }
+        try scene.draw(on:b,at:FrameTime(frame:12,fps:24))
+        XCTAssertEqual(Data(bytes:a.context.data!,count:a.context.bytesPerRow*16),Data(bytes:b.context.data!,count:b.context.bytesPerRow*16))
+    }
+    func testColorNoiseAndCurves() throws {
+        XCTAssertEqual(try Color(hex:"#f008"),Color(1,0,0,136.0/255)); XCTAssertThrowsError(try Color(hex:"xyz"))
+        let noise = Noise(seed:9); XCTAssertEqual(noise.value(1.3,2.4),Noise(seed:9).value(1.3,2.4))
+        XCTAssertLessThan(abs(noise.value(1.3,2.4)-noise.value(1.3001,2.4)),0.001)
+        let a = CGPoint.zero, d = CGPoint(x:10,y:10)
+        XCTAssertEqual(Path.bezierPoint(a,a,d,d,t:0),a); XCTAssertEqual(Path.bezierPoint(a,a,d,d,t:1),d)
+    }
+    func testTextOutlinesAndUnicodeReveal() throws {
+        let layout = TextLayout("SIGNAL",size:20); XCTAssertGreaterThan(layout.width,30); XCTAssertFalse(layout.outline.cgPath.isEmpty)
+        XCTAssertEqual(Motion.typed("👩🏽‍🚀é",progress:0.5),"👩🏽‍🚀")
+        let c = try Canvas(width:128,height:40); layout.draw(on:c,at:CGPoint(x:2,y:28))
+        let top = (0..<28).reduce(0) { sum,y in sum+(0..<100).reduce(0) { $0+Int(pixel(c,$1,y)[3]) } }
+        XCTAssertGreaterThan(top,0); XCTAssertEqual(pixel(c,3,38)[3],0)
+    }
+    func testSpriteClampingLoopAndBackwardSeek() throws {
+        let dir = try temp(), c = try Canvas(width:4,height:4)
+        for i in 0..<3 { c.clear(Color(Double(i)/2,0,0)); try c.writePNG(to:dir.appendingPathComponent(String(format:"%04d.png",i))) }
+        let s = try SpriteSequence(directory:dir,count:3,fps:2,rect:CGRect(x:0,y:0,width:4,height:4),cacheLimit:1)
+        XCTAssertNoThrow(try s.image(at:1)); XCTAssertNoThrow(try s.image(at:0)); XCTAssertNoThrow(try s.image(at:100))
+        s.loop = true; c.clear(); c.image(try s.image(at:-0.5).image,in:CGRect(x:0,y:0,width:4,height:4)); XCTAssertEqual(pixel(c,1,1)[0],255)
+    }
+    func testDocumentRejectsTyposBadTracksAndMissingAssets() throws {
+        let dir = try temp(), url = dir.appendingPathComponent("scene.json")
+        for json in ["{\"nodes\":[{\"type\":\"typo\"}]}","{\"nodes\":[{\"type\":\"rect\",\"tracks\":{\"x\":[[1,0],[0,1]]}}]}","{\"nodes\":[{\"type\":\"image\",\"path\":\"missing.png\"}]}","{\"noodes\":[]}"] {
+            try Data(json.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
+        }
+    }
+    func testHoldEasingStepsAtNextKey() throws {
+        let t = try Track([Keyframe(0,0),Keyframe(1,10,easing:.hold),Keyframe(2,20,easing:.hold)])
+        XCTAssertEqual(t.value(at:0.99),0); XCTAssertEqual(t.value(at:1),10); XCTAssertEqual(t.value(at:1.5),10); XCTAssertEqual(t.value(at:2),20)
+    }
+    func testSoundSynthKindsAreDeterministicShapedAndNormalized() throws {
+        for (kind,d) in SoundSynth.defaults {
+            let a = try SoundSynth.render(["synth":kind,"seed":3]), b = try SoundSynth.render(["synth":kind,"seed":3])
+            XCTAssertEqual(a.left.count,Int(d*SoundSynth.rate),kind); XCTAssertEqual(a.left,b.left,kind)
+            let peak = zip(a.left,a.right).map { max(abs($0),abs($1)) }.max()!
+            XCTAssertEqual(peak,pow(10,-3.0/20),accuracy:1e-6,kind)
+        }
+        XCTAssertNotEqual(try SoundSynth.render(["synth":"whoosh","seed":1]).left,try SoundSynth.render(["synth":"whoosh","seed":2]).left)
+        // The whoosh is loudest near its `peak` fraction; risers and reverse cymbals swell into their end; impacts hit at once.
+        XCTAssertEqual(try SoundSynth.render(["synth":"whoosh","duration":1.0,"peak":0.6]).peakAt,0.6,accuracy:0.12)
+        XCTAssertGreaterThan(try SoundSynth.render(["synth":"riser","duration":1.0]).peakAt,0.85)
+        XCTAssertGreaterThan(try SoundSynth.render(["synth":"reverse","duration":1.0]).peakAt,0.85)
+        XCTAssertLessThan(try SoundSynth.render(["synth":"impact"]).peakAt,0.05)
+        // The whoosh pans from left to right.
+        let w = try SoundSynth.render(["synth":"whoosh","duration":1.0,"pan":[-1,1]]), q = w.left.count/5
+        let energy = { (x: ArraySlice<Double>) in x.map { $0*$0 }.reduce(0,+) }
+        XCTAssertGreaterThan(energy(w.left[q..<2*q]),energy(w.right[q..<2*q])); XCTAssertGreaterThan(energy(w.right[(4*q)...]),energy(w.left[(4*q)...]))
+        XCTAssertThrowsError(try SoundSynth.render(["synth":"kazoo"])); XCTAssertThrowsError(try SoundSynth.render(["synth":"tick","duration":60]))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("synth-\(UUID()).wav")
+        try SoundSynth.writeWAV(try SoundSynth.render(["synth":"tick"]),to:url)
+        let file = try AVAudioFile(forReading:url)
+        XCTAssertEqual(file.processingFormat.channelCount,2); XCTAssertEqual(file.fileFormat.sampleRate,48_000); XCTAssertEqual(file.length,1680)
+    }
+    func testNeonGlowHalosStrokesAndSmallFillsOnlyAndSupersamplingKeepsSceneCoordinates() throws {
+        func line(glow: Double, core: Double) throws -> Canvas {
+            let c = try Canvas(width:64,height:32); c.clear()
+            let scene = Scene(), n = ShapeNode(.polygon([CGPoint(x:4,y:16),CGPoint(x:60,y:16)],closed:false),style:Style(fill:nil,stroke:Color(1,0,0),lineWidth:2))
+            if glow > 0 { n.glow = glow; n.glowCore = core }
+            try scene.root.add(n); try scene.draw(on:c,at:FrameTime(frame:0,fps:24)); return c
+        }
+        let plain = try line(glow:0,core:0), neon = try line(glow:6,core:1)
+        XCTAssertEqual(pixel(plain,32,22)[3],0)
+        XCTAssertGreaterThan(pixel(neon,32,22)[3],10)                       // halo outside the stroke
+        XCTAssertGreaterThan(pixel(neon,32,16)[1],60)                       // whitened core on a red tube
+        XCTAssertLessThan(pixel(plain,32,16)[1],10)
+        // Big fills never glow (a background must not haze the frame); small dots do.
+        let c = try Canvas(width:400,height:400); c.clear(); c.glow = 8
+        c.style = Style(fill:Color(0,1,0)); c.rect(20,20,300,300); c.circle(370,370,6)
+        XCTAssertEqual(pixel(c,20,330)[3],0); XCTAssertGreaterThan(pixel(c,370,376)[3],10)
+        let ink = try Canvas(width:64,height:64); ink.clear(); ink.glow = 8; ink.style = Style(fill:nil,stroke:Color(0.05,0.05,0.05),lineWidth:2)
+        ink.line(4,32,60,32); XCTAssertEqual(pixel(ink,32,38)[3],0)                 // dark ink never glows
+        // 2x supersampling: twice the device pixels, same scene coordinates and top-left origin.
+        let s = try Canvas(width:32,height:32,supersample:2); s.clear(); s.style = Style(fill:Color(1,1,1)); s.rect(0,0,10,10)
+        XCTAssertEqual(s.context.width,64); XCTAssertEqual(pixel(s,19,19)[3],255); XCTAssertEqual(pixel(s,21,21)[3],0)
+        XCTAssertThrowsError(try Canvas(width:8,height:8,supersample:5))
+        let dir = try temp(), url = dir.appendingPathComponent("scene.json")
+        try Data(#"{"nodes":[{"type":"group","glow":4,"glowCore":0.5,"children":[{"type":"line","points":[[0,0],[9,0]],"tracks":{"glow":[[0,2],[1,6]]}}]}]}"#.utf8).write(to:url)
+        let doc = try SceneDocument(url:url,width:32,height:32), group = doc.scene.root.children[0]
+        XCTAssertEqual(group.glow,4); XCTAssertEqual(group.glowCore,0.5); XCTAssertEqual(group.children[0].glow,0); XCTAssertNotNil(group.children[0].tracks["glow"])
+    }
+    func testInExpoMirrorsOutExpo() {
+        XCTAssertEqual(Easing.inExpo.evaluate(0),0); XCTAssertEqual(Easing.inExpo.evaluate(1),1,accuracy:1e-12)
+        XCTAssertEqual(Easing.inExpo.evaluate(0.3),1-Easing.outExpo.evaluate(0.7),accuracy:1e-12)
+        XCTAssertNotNil(Easing(rawValue:"inExpo"))
+    }
+    func testTrimDrawsOnlyThePartialOutlineAndBoilIsDeterministic() throws {
+        let line = ShapeNode(.polygon([CGPoint(x:0,y:8),CGPoint(x:64,y:8)],closed:false),style:Style(fill:nil,stroke:.white,lineWidth:4))
+        line.tracks["trimEnd"] = try Track([Keyframe(0,0),Keyframe(1,1)])
+        let scene = Scene(); try scene.root.add(line)
+        let c = try Canvas(width:64,height:16); try scene.draw(on:c,at:FrameTime(frame:12,fps:24))
+        XCTAssertEqual(pixel(c,16,8)[3],255); XCTAssertEqual(pixel(c,48,8)[3],0)
+        let lines = Path.rect(CGRect(x:0,y:0,width:10,height:10)).flattened()
+        XCTAssertEqual(lines.count,1); XCTAssertTrue(lines[0].closed); XCTAssertEqual(lines[0].length,40,accuracy:1e-6)
+        let a = Path.trimmed(lines,from:0,to:1,boil:2,step:3,seed:5).cgPath, b = Path.trimmed(lines,from:0,to:1,boil:2,step:3,seed:5).cgPath
+        XCTAssertEqual(a,b); XCTAssertNotEqual(a,Path.trimmed(lines,from:0,to:1,boil:2,step:4,seed:5).cgPath)
+        XCTAssertTrue(Path.trimmed(lines,from:0.6,to:0.4).cgPath.isEmpty)
+    }
+    func testDocumentTextAlignmentWarpGridAndShapeTracks() throws {
+        let dir = try temp(), url = dir.appendingPathComponent("scene.json")
+        let json = """
+        {"nodes":[{"type":"text","text":"WWW","size":20,"x":64,"y":30,"align":"center","tracking":2},
+                  {"type":"warpgrid","width":128,"height":40,"spacing":16,"strength":0.6,"falloff":30,"color":"#ffffff","tracks":{"strength":[[0,0],[1,1]]}},
+                  {"type":"line","points":[[0,0],[10,0]],"boil":1,"tracks":{"trimEnd":[[0,0],[1,1]],"strokeWidth":[[0,1],[1,3]]}}]}
+        """
+        try Data(json.utf8).write(to:url)
+        let doc = try SceneDocument(url:url,width:128,height:40)
+        let text = doc.scene.root.children[0] as! TextNode; XCTAssertEqual(text.alignment,.center)
+        let c = try Canvas(width:128,height:40); try doc.scene.draw(on:c,at:FrameTime(frame:12,fps:24))
+        let left = (0..<40).reduce(0) { s,y in s+(0..<20).reduce(0) { $0+Int(pixel(c,$1,y)[3]) } }
+        XCTAssertGreaterThan(left,0)
+        for bad in ["{\"nodes\":[{\"type\":\"text\",\"text\":\"A\",\"align\":\"middle\"}]}",
+                    "{\"nodes\":[{\"type\":\"text\",\"text\":\"A\",\"tracks\":{\"trimEnd\":[[0,0],[1,1]]}}]}",
+                    "{\"nodes\":[{\"type\":\"rect\",\"boil\":-1}]}",
+                    "{\"nodes\":[{\"type\":\"text\",\"text\":\"A\",\"font\":\"NoSuchFont-Bold\"}]}"] {
+            try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
+        }
+    }
+    func testPlaneProjectionForeshortensClipsAndComposes() throws {
+        let p = Projection(base:.identity,pivot:.zero,rx:1,ry:0)
+        let (top,ts) = p.project(local:CGPoint(x:100,y:-100))!, (bottom,bs) = p.project(local:CGPoint(x:100,y:100))!
+        XCTAssertLessThan(ts,1); XCTAssertGreaterThan(bs,1); XCTAssertLessThan(top.x,100); XCTAssertGreaterThan(bottom.x,100)
+        XCTAssertNil(Projection(base:.identity,pivot:.zero,rx:0,ry:0,tz:-1340).project(local:.zero))
+        let nested = Projection(base:.identity,pivot:.zero,rx:0,ry:0.5,outer:p)
+        XCTAssertNotEqual(nested.map(device:CGPoint(x:50,y:-50))!.0,p.map(device:CGPoint(x:50,y:-50))!.0)
+        // A 160px square tipped back: the far (top) edge narrows inside x=20, the near (bottom) edge widens past it.
+        let scene = Scene(), plane = PlaneNode(); plane.position = CGPoint(x:100,y:100); plane.anchor = CGPoint(x:100,y:100); plane.rotationX = 1
+        try plane.add(ShapeNode(.rect(CGRect(x:20,y:20,width:160,height:160)))); try scene.root.add(plane)
+        let c = try Canvas(width:200,height:200); try scene.draw(on:c,at:FrameTime(frame:0,fps:24))
+        XCTAssertEqual(pixel(c,18,140)[3],255); XCTAssertEqual(pixel(c,18,65)[3],0)
+        XCTAssertEqual(pixel(c,100,40)[3],0); XCTAssertEqual(pixel(c,100,100)[3],255)
+    }
+    func testFloorRunningBehindTheCameraIsClippedNotDropped() throws {
+        // A floor tipped almost flat whose near rows pass behind the viewer: the visible part must still draw.
+        let p = Projection(base:.identity,pivot:CGPoint(x:100,y:100),rx:1.5,ry:0,ty:60,focal:200)
+        let open = Path(); open.move(100,-400); open.line(100,400)
+        let (clipped,_) = p.project(open,ctm:.identity)!
+        let pts = clipped.flattened().flatMap(\.points)
+        XCTAssertEqual(pts.count,2); XCTAssertTrue(pts.allSatisfy { $0.y > 100 })
+        let ring = p.project(.rect(CGRect(x:60,y:-400,width:80,height:800)),ctm:.identity)!.0.flattened()
+        XCTAssertEqual(ring.count,1); XCTAssertTrue(ring[0].closed); XCTAssertEqual(ring[0].points.count,4)
+        XCTAssertNil(p.project(.rect(CGRect(x:60,y:300,width:80,height:100)),ctm:.identity))
+        let scene = Scene(), plane = PlaneNode(); plane.position = CGPoint(x:100,y:100); plane.anchor = CGPoint(x:100,y:100)
+        plane.rotationX = 1.5; plane.panY = 60; plane.perspective = 200
+        let grid = Designs.grid(width:200,height:800,spacing:20,color:.white); grid.position = CGPoint(x:0,y:-400)
+        try plane.add(grid); try scene.root.add(plane)
+        let c = try Canvas(width:200,height:200); try scene.draw(on:c,at:FrameTime(frame:0,fps:24))
+        XCTAssertGreaterThan((0..<200).filter { pixel(c,100,$0)[3] > 0 }.count,40)
+    }
+    func testDocumentPlaneTextPathRingsAndSkew() throws {
+        let dir = try temp(), url = dir.appendingPathComponent("scene.json")
+        let json = """
+        {"nodes":[{"type":"plane","x":64,"y":64,"anchor":[64,64],"tracks":{"rotationY":[[0,0],[1,0.8]],"panX":[[0,0],[1,10]]},
+                   "children":[{"type":"text","text":"HI","size":30,"x":64,"y":70,"align":"center","reveal":[[0,0],[1,1]]}]},
+                  {"type":"textpath","text":"ABCD","size":16,"radius":30,"x":64,"y":64,"align":"center","tracks":{"reveal":[[0,0],[1,1]],"offset":[[0,0],[1,20]]}},
+                  {"type":"rings","radius":4,"spacing":6,"count":5,"sides":6,"x":20,"y":110,"tracks":{"phase":[[0,0],[1,1]]}},
+                  {"type":"rect","width":10,"height":10,"skewX":0.3,"tracks":{"skewY":[[0,0],[1,0.2]]}}]}
+        """
+        try Data(json.utf8).write(to:url)
+        let doc = try SceneDocument(url:url,width:128,height:128)
+        let tp = doc.scene.root.children[1] as! TextPathNode
+        XCTAssertEqual(tp.layout.glyphs.count,4); XCTAssertEqual(tp.sample(0)!.0.y,-30,accuracy:0.5)
+        func ink(_ t: Int, _ x0: Int, _ x1: Int, _ y0: Int, _ y1: Int) throws -> Int {
+            let c = try Canvas(width:128,height:128); try doc.scene.draw(on:c,at:FrameTime(frame:t,fps:24))
+            return (y0..<y1).reduce(0) { s,y in s+(x0..<x1).reduce(0) { $0+Int(pixel(c,$1,y)[3]) } }
+        }
+        XCTAssertEqual(try ink(0,44,84,20,40),0); XCTAssertGreaterThan(try ink(24,30,100,20,45),0)
+        XCTAssertGreaterThan(try ink(24,40,90,50,80),0)
+        for bad in ["{\"nodes\":[{\"type\":\"textpath\",\"text\":\"A\",\"points\":[[0,0]]}]}",
+                    "{\"nodes\":[{\"type\":\"rings\",\"spacing\":0}]}",
+                    "{\"nodes\":[{\"type\":\"plane\",\"perspective\":0}]}",
+                    "{\"nodes\":[{\"type\":\"text\",\"text\":\"A\",\"tracks\":{\"offset\":[[0,0],[1,1]]}}]}"] {
+            try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
+        }
+    }
+    func testCoreImageMaskAndComposition() throws {
+        let c = try Compositor(width:16,height:16), canvas = try Canvas(width:16,height:16)
+        let bounds = c.extent, red = CIImage(color:CIColor(red:1,green:0,blue:0)).cropped(to:bounds)
+        let mask = CIImage(color:.white).cropped(to:CGRect(x:0,y:8,width:16,height:8))
+        let clear = CIImage(color:.clear).cropped(to:bounds)
+        canvas.image(try c.image(c.composite(red,over:clear,opacity:0.5,mask:mask)),in:bounds)
+        XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:2); XCTAssertEqual(pixel(canvas,4,12)[3],0)
+    }
+    func testMetalParticlesDeterministicAndOriented() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
+        let particles = try MetalParticles(width:64,height:64,particles:[.init(origin:SIMD2(12,10),velocity:.zero,color:SIMD4(1,0,0,1),size:6,phase:1,life:2)])
+        let c = try Compositor(width:64,height:64), canvas = try Canvas(width:64,height:64)
+        canvas.image(try c.image(particles.render(at:0)),in:c.extent)
+        XCTAssertGreaterThan(pixel(canvas,12,10)[3],100); XCTAssertEqual(pixel(canvas,12,54)[3],0)
+        let a = Data(bytes:canvas.context.data!,count:canvas.context.bytesPerRow*64)
+        _ = try particles.render(at:3); canvas.clear(); canvas.image(try c.image(particles.render(at:0)),in:c.extent)
+        XCTAssertEqual(a,Data(bytes:canvas.context.data!,count:canvas.context.bytesPerRow*64))
+    }
+    func test3DPrimitivesRender() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
+        let scene = try Scene3D(width:64,height:64); scene.add(.torus,color:Color(0,1,1))
+        let c = try Compositor(width:64,height:64), canvas = try Canvas(width:64,height:64)
+        canvas.image(try c.image(scene.render(at:0)),in:c.extent)
+        XCTAssertGreaterThan((0..<64).reduce(0) { sum,y in sum+(0..<64).reduce(0) { $0+Int(pixel(canvas,$1,y)[3]) } },0)
+    }
+    func testNativeVideoFrameCountTimingAndDecode() async throws {
+        let url = try temp().appendingPathComponent("test.mp4"), c = try Compositor(width:64,height:32)
+        let writer = try VideoWriter(url:url,width:64,height:32,fps:24)
+        for f in 0..<6 {
+            let image = CIImage(color:CIColor(cgColor:Color(Double(f)/5,0.25,0.5).cgColor)).cropped(to:c.extent)
+            try await writer.append(image,frame:f,compositor:c)
+        }
+        try await writer.finish()
+        let source = try await VideoSource(url:url); XCTAssertEqual(source.duration,0.25,accuracy:0.002)
+        let canvas = try Canvas(width:64,height:32)
+        canvas.image(try c.image(source.image(at:2.0/24,size:c.extent.size)),in:c.extent)
+        for (channel,value) in [102,64,128].enumerated() { XCTAssertEqual(Int(pixel(canvas,10,10)[channel]),value,accuracy:5) }
+        canvas.clear()
+        canvas.image(try c.image(source.image(at:5.0/24,size:c.extent.size)),in:c.extent)
+        XCTAssertGreaterThan(pixel(canvas,10,10)[0],240)
+        XCTAssertThrowsError(try source.image(at:0,size:c.extent.size))
+        let asset = AVURLAsset(url:url), track = try await asset.loadTracks(withMediaType:.video).first!
+        let reader = try AVAssetReader(asset:asset), output = AVAssetReaderTrackOutput(track:track,outputSettings:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA])
+        reader.add(output); XCTAssertTrue(reader.startReading()); var count = 0
+        while output.copyNextSampleBuffer() != nil { count += 1 }; XCTAssertEqual(count,6)
+    }
+    func testComputeSignalPreservesOrientationAndAlpha() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("No Metal device in this session") }
+        let canvas = try Canvas(width:32,height:32); canvas.style.fill = Color(1,0.5,0.2,0.5); canvas.rect(0,0,32,8)
+        let input = CIImage(cgImage:try canvas.snapshot()), c = try Compositor(width:32,height:32)
+        let identity = try SignalEffect(width:32,height:32,grain:0,scanlines:0,chromaticPixels:0)
+        let output = try c.image(identity.apply(input,at:FrameTime(frame:4,fps:24)))
+        canvas.clear(); canvas.image(output,in:c.extent)
+        XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:2); XCTAssertEqual(pixel(canvas,4,28)[3],0)
+        let grain = try SignalEffect(width:32,height:32,grain:0.8,scanlines:0,chromaticPixels:0)
+        canvas.clear(); canvas.image(try c.image(grain.apply(input,at:FrameTime(frame:4,fps:24))),in:c.extent)
+        let alphaSum = (0..<8).reduce(0) { sum,y in sum+(0..<32).reduce(0) { $0+Int(pixel(canvas,$1,y)[3]) } }
+        XCTAssertLessThan(alphaSum,32*8*110)
+    }
+    func testProResAlphaAndFractionalFPS() async throws {
+        let url = try temp().appendingPathComponent("alpha.mov"), c = try Compositor(width:64,height:32)
+        let writer = try VideoWriter(url:url,width:64,height:32,fps:30000.0/1001,codec:.prores4444)
+        let transparent = CIImage(color:.clear).cropped(to:c.extent)
+        let image = CIImage(color:CIColor(red:1,green:0,blue:0,alpha:0.5)).cropped(to:CGRect(x:0,y:16,width:64,height:16)).composited(over:transparent)
+        for f in 0..<5 { try await writer.append(image,frame:f,compositor:c) }; try await writer.finish()
+        let source = try await VideoSource(url:url)
+        XCTAssertEqual(source.duration,5*1001.0/30000,accuracy:0.002)
+        let canvas = try Canvas(width:64,height:32); canvas.image(try c.image(source.image(at:0,size:c.extent.size)),in:c.extent)
+        XCTAssertEqual(pixel(canvas,4,4)[3],128,accuracy:4); XCTAssertEqual(pixel(canvas,4,28)[3],0,accuracy:2)
+    }
+    func testShaderNodeDrawsProceduralNebulaInsideItsRevealedDisc() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let url = try temp().appendingPathComponent("scene.json")
+        let json = """
+        {"nodes":[{"type":"shader","shader":"nebula","width":160,"height":90,"center":[80,45],"radius":40,"seed":7,
+                   "colors":["#3A0F5C","#FF5A1F","#FFD27A"],"core":1,"tracks":{"reveal":[[0,0.01],[1,1]],"brightness":[[0,2],[1,2]]}}]}
+        """
+        try Data(json.utf8).write(to:url)
+        let doc = try SceneDocument(url:url,width:160,height:90)
+        func light(_ frame: Int) throws -> (centre: Int, corner: Int) {
+            let c = try Canvas(width:160,height:90); c.clear(); try doc.scene.draw(on:c,at:FrameTime(frame:frame,fps:24))
+            let sum = { (x0: Int, y0: Int) in (y0..<y0+10).reduce(0) { s,y in s+(x0..<x0+10).reduce(0) { $0+Int(self.pixel(c,$1,y)[3]) } } }
+            return (sum(75,40), sum(0,0))
+        }
+        let early = try light(0), late = try light(24)
+        XCTAssertLessThan(early.centre,late.centre/4)     // reveal grows the cloud from nothing
+        XCTAssertGreaterThan(late.centre,1500)            // gas + synchrotron core light the middle
+        XCTAssertLessThan(late.corner,late.centre/3)      // outside the disc: only sparse stars
+        for bad in ["{\"nodes\":[{\"type\":\"shader\",\"shader\":\"plasma\"}]}",
+                    "{\"nodes\":[{\"type\":\"shader\",\"shader\":\"nebula\",\"colors\":[1]}]}",
+                    "{\"nodes\":[{\"type\":\"shader\",\"shader\":\"nebula\",\"tracks\":{\"trimEnd\":[[0,0],[1,1]]}}]}"] {
+            try Data(bad.utf8).write(to:url); XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
+        }
+    }
+    func testStarfieldShaderDrawsSparseTwinklingStarsThatSwellOnTheBeat() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let url = try temp().appendingPathComponent("scene.json")
+        try Data("""
+        {"nodes":[{"type":"shader","shader":"starfield","width":480,"height":270,"seed":3,"pulse":1,"twinkle":0.8,
+                   "colors":["#EDE6D8","#FF5A1F","#2EE6FF"],"tracks":{"beat":[[0,0],[1,1]]}}]}
+        """.utf8).write(to:url)
+        let doc = try SceneDocument(url:url,width:480,height:270)
+        func frame(_ n: Int) throws -> (sum: Int, lit: Int) {
+            let c = try Canvas(width:480,height:270); c.clear(); try doc.scene.draw(on:c,at:FrameTime(frame:n,fps:24))
+            var sum = 0, lit = 0
+            for y in stride(from:0,to:270,by:1) { for x in stride(from:0,to:480,by:1) { let a = Int(self.pixel(c,x,y)[3]); sum += a; if a > 40 { lit += 1 } } }
+            return (sum, lit)
+        }
+        let onBeat = try frame(0), settled = try frame(23)
+        XCTAssertGreaterThan(settled.lit,30)                   // there are stars ...
+        XCTAssertLessThan(settled.lit,480*270/20)             // ... sparse ones
+        XCTAssertGreaterThan(onBeat.sum,settled.sum*5/4)      // the beat swells them
+        try Data("{\"nodes\":[{\"type\":\"shader\",\"shader\":\"starfield\",\"tracks\":{\"swirl\":[[0,0],[1,1]]}}]}".utf8).write(to:url)
+        XCTAssertThrowsError(try SceneDocument(url:url,width:32,height:32))
+    }
+    func testAudioAnalysisUsesAbsoluteSampleBoundaries() throws {
+        let url = try temp().appendingPathComponent("tone.wav")
+        let format = AVAudioFormat(standardFormatWithSampleRate:44100,channels:1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:44100)!
+        buffer.frameLength = 44100
+        for i in 0..<44100 { buffer.floatChannelData![0][i] = Float(sin(Double(i)*2 * .pi*440/44100))*0.5 }
+        do { let file = try AVAudioFile(forWriting:url,settings:format.settings); try file.write(from:buffer) }
+        let result = try AudioAnalyzer().analyze(url:url,fps:30000.0/1001)
+        XCTAssertEqual(result.rms.count,30); XCTAssertEqual(result.rms[0],Float(0.5/sqrt(2)),accuracy:0.01)
+        XCTAssertEqual(result.bands[0].count,32); XCTAssertGreaterThan(result.bands[0].max()!,0.03)
+    }
+
+    func testMemoryCompositionLayerTransformsAndStaticCache() throws {
+        let composition = try Composition(width:32,height:32), scene = Scene()
+        let rect = ShapeNode(.rect(CGRect(x:0,y:0,width:8,height:8)),style:Style(fill:Color(1,0,0)))
+        try scene.root.add(rect)
+        let layer = try VectorLayer(scene,width:32,height:32)
+        layer.transform = CGAffineTransform(translationX:4,y:12); layer.opacity = 0.5
+        composition.layers = [layer]
+        let canvas = try Canvas(width:32,height:32)
+        canvas.image(try composition.compositor.image(composition.image(at:FrameTime(frame:0,fps:24))),in:composition.compositor.extent)
+        XCTAssertEqual(pixel(canvas,6,14)[3],128,accuracy:2); XCTAssertEqual(pixel(canvas,6,2)[3],0)
+        let cached = try ImageAsset.rasterize(rect,width:8,height:8)
+        canvas.clear(); canvas.image(cached.image,in:CGRect(x:0,y:0,width:8,height:8)); XCTAssertEqual(pixel(canvas,4,4),[255,0,0,255])
+    }
+    func testAudioAndPictureShareOneOutputWithTrimmedPCM() async throws {
+        let dir = try temp(), wav = dir.appendingPathComponent("source.wav"), movie = dir.appendingPathComponent("final.mp4")
+        let format = AVAudioFormat(standardFormatWithSampleRate:48000,channels:1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:48000)!; buffer.frameLength = 48000
+        for i in 0..<48000 { buffer.floatChannelData![0][i] = Float(sin(Double(i)*2 * .pi*500/48000))*0.3 }
+        do { let file = try AVAudioFile(forWriting:wav,settings:format.settings); try file.write(from:buffer) }
+        let source = try await AudioSource(url:wav,start:0.25,duration:0.5)
+        let c = try Compositor(width:64,height:32), writer = try VideoWriter(url:movie,width:64,height:32,fps:24,audio:source)
+        for f in 0..<12 { try await writer.append(CIImage(color:.white).cropped(to:c.extent),frame:f,compositor:c) }
+        try await writer.finish()
+        let asset = AVURLAsset(url:movie), tracks = try await asset.loadTracks(withMediaType:.audio)
+        XCTAssertEqual(tracks.count,1)
+        let duration = try await asset.load(.duration).seconds; XCTAssertEqual(duration,0.5,accuracy:0.003)
+        let reader = try AVAssetReader(asset:asset)
+        let output = AVAssetReaderTrackOutput(track:tracks[0],outputSettings:[AVFormatIDKey:kAudioFormatLinearPCM,AVLinearPCMBitDepthKey:16,AVLinearPCMIsFloatKey:false,AVLinearPCMIsNonInterleaved:false])
+        reader.add(output); XCTAssertTrue(reader.startReading()); var samples = 0
+        while let sample = output.copyNextSampleBuffer() { samples += CMSampleBufferGetNumSamples(sample) }
+        XCTAssertGreaterThan(samples,20000)
+        // Compressed AAC readers emit grouped packets and empty timing markers.
+        // Exercise passthrough with picture continuing well after audio EOF.
+        let copied = dir.appendingPathComponent("copied.mp4")
+        let aac = try await AudioSource(url:movie,duration:2)
+        let second = try VideoWriter(url:copied,width:64,height:32,fps:24,audio:aac)
+        for f in 0..<48 { try await second.append(CIImage(color:.white).cropped(to:c.extent),frame:f,compositor:c) }
+        try await second.finish()
+        let copyAsset = AVURLAsset(url:copied)
+        let copyDuration = try await copyAsset.load(.duration).seconds
+        let copyTracks = try await copyAsset.loadTracks(withMediaType:.audio)
+        XCTAssertEqual(copyDuration,2,accuracy:0.003); XCTAssertEqual(copyTracks.count,1)
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath:dir.path)),Set(["source.wav","final.mp4","copied.mp4"]))
+    }
+
+}

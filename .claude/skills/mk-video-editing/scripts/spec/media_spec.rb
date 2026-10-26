@@ -1,0 +1,157 @@
+require_relative "spec_helper"
+RSpec.describe "Local media end to end", :media do
+  it "executes the documented intake and audio-analysis task in a fresh project" do
+    song = tone(duration: 3)
+    File.write(file("brief.md"), "A robot band, visual puns and dramatic drop")
+    destination = file("new project")
+    _, err, status = cli("init", "--project", destination, "--song", song, "--prompt-file", file("brief.md"))
+    expect(status.exitstatus).to eq(0), err
+    out, err, status = cli("--project", destination, "audio:analyze[audio/source.wav,audio]")
+    expect(status.exitstatus).to eq(0), err
+    expect(JSON.parse(out)["duration"]).to be_within(0.01).of(3)
+    expect(File.file?(File.join(destination,"tools/python/beats.py"))).to be(true)
+    expect(File.file?(File.join(destination,".skill/SKILL.md"))).to be(true)
+    expect(File.directory?(File.join(destination,"node_modules"))).to be(false)
+    expect(File.directory?(File.join(destination,"tools/vfx/.build"))).to be(false)
+  end
+  it "renders typography, timing and graphics helpers without bundled font files" do
+    result = Media::Anim.new.render(File.join(RT,"tools/graphics/examples/futuristic.json"), file("smoke"), width: 1920, height: 1080, fps: 24, frames: 48, only: [0,24,47])
+    expect(result["frames"]).to eq(3)
+    expect(magick.alpha_coverage(file("smoke/0024.png"))).to be > 0.03
+    expect(File.binread(file("smoke/0000.png"))).not_to eq(File.binread(file("smoke/0047.png")))
+  end
+  it "detects audio duration, a real silent tail and vocal-band energy through Python" do
+    song = tone(duration: 4)
+    Toolkit::Operations.new.analyze_audio(song, file("analysis"))
+    energy = JSON.parse(File.read(file("analysis/energy.json")))
+    expect(energy["duration"]).to be_within(0.02).of(4)
+    expect(energy["silence_tail_s"]).to be >= 0.5
+    expect(energy["windows"].first["vocal_ratio"]).to be > 0.9
+    beats = JSON.parse(File.read(file("analysis/beats.json")))
+    expect(beats.fetch("beats")).not_to be_empty
+  end
+  it "finds a hard cut at the expected frame through Python" do
+    ff.run("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=black:s=320x180:r=24:d=1", "-f", "lavfi", "-i", "color=white:s=320x180:r=24:d=1", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", "-c:v", "libx264", file("cuts.mp4"))
+    data = py.call("cuts.py", file("cuts.mp4"))
+    expect(data["cuts"].map { |c| c["f"] }).to include(24)
+    expect(data["frames"]).to eq(48)
+  end
+  it "cuts out green, preserves the character and renders it at the intended native position" do
+    meta = py.cutout(character, file("sprite"), "green")
+    rgba = pixels(file("sprite/0000.png"))
+    expect(rgba[0][3]).to eq(0)
+    expect(rgba[90 * 320 + 160][3]).to be > 250
+    meta["dir"] = file("sprite").delete_prefix("#{RT}/")
+    json(file("clips.json"), hero: meta)
+    native_scene(file("scene.json"), clip: "hero", background: "#102030", speed: 48, x: 8)
+    renderer = Media::Anim.new
+    renderer.render(file("scene.json"), file("frames"), width: 320, height: 180, fps: 24, frames: 24, data: {clips: file("clips.json")})
+    png = pixels(file("frames/0000.png"))
+    red = png.each_index.select { |i| r,g,b,_ = png[i]; r > 170 && g < 90 && b < 110 }
+    xs = red.map { |i| i % 320 }; ys = red.map { |i| i / 320 }
+    expect(xs.min).to be_within(3).of(208)
+    expect(xs.max).to be_within(3).of(272)
+    expect(ys.min).to be_within(3).of(36)
+    expect(ys.max).to be_within(3).of(144)
+    expect(Digest::SHA256.file(file("frames/0000.png")).hexdigest).not_to eq(Digest::SHA256.file(file("frames/0023.png")).hexdigest)
+    renderer.render(file("scene.json"), file("repeat"), width: 320, height: 180, fps: 24, frames: 24, only: [0], data: {clips: file("clips.json")})
+    expect(File.binread(file("repeat/0000.png"))).to eq(File.binread(file("frames/0000.png")))
+    base = video(seconds: 1)
+    ff.overlay_frames(base, file("frames"), file("scene.mp4"), fps: 24)
+    info = ff.summary(file("scene.mp4"))
+    expect(info.dig(:video, :frames)).to eq(24)
+    expect(info.dig(:audio, :codec)).to eq("aac")
+  end
+  it "assembles contiguous sections without losing frames or the original soundtrack timing" do
+    song = tone(duration: 2)
+    runs = %w[e2e-join-a e2e-join-b]
+    generations = runs.each_with_index.to_h { |name, i| [name, {steps: [], **Pipeline.section(i * 24, 24), music_from: song}] }
+    stub_const("Pipeline::GENERATIONS", generations)
+    runs.each do |run|
+      project = Pipeline::Project.new(run)
+      video(project.path("final_overlay.mp4"), audio: song, seconds: 1)
+    end
+    Toolkit::Operations.new.preview(file("joined.mp4"), runs)
+    info = ff.summary(file("joined.mp4"))
+    expect(info.dig(:video, :frames)).to eq(48)
+    expect(info[:duration]).to be_within(0.06).of(2)
+    original = ff.run("ffmpeg", "-v", "error", "-i", song, "-ac", "1", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    joined = ff.run("ffmpeg", "-v", "error", "-i", file("joined.mp4"), "-ac", "1", "-ar", "44100", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    size = [original.size, joined.size].min
+    dot = original.take(size).zip(joined).sum { |x,y| x * y }
+    norm = Math.sqrt(original.take(size).sum { |x| x*x } * joined.take(size).sum { |x| x*x })
+    expect(dot / norm).to be > 0.98
+  end
+  it "mixes a timed sound effect, limits peaks and keeps the video frames" do
+    source = video(seconds: 2)
+    name = "e2e-sfx-#{Process.pid}"
+    config_dir = File.join(RT, "prompts", name); FileUtils.mkdir_p(config_dir)
+    File.write(File.join(config_dir, "sfx.yml"), YAML.dump({"source" => source, "out" => file("mixed.mp4"), "sounds" => {"beep" => {"tone" => 1200, "duration" => 0.3}}, "cues" => [{"sound" => "beep", "at" => 0.75, "rel_db" => -4}]}))
+    service = Media::Sfx.new(name)
+    service.generate(client: double("no Fal calls for tones"))
+    out, report = service.mix
+    expect(ff.summary(out).dig(:video, :frames)).to eq(48)
+    expect(report).not_to be_empty
+    dry = ff.run("ffmpeg", "-v", "error", "-i", source, "-ac", "1", "-ar", "48000", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    wet = ff.run("ffmpeg", "-v", "error", "-i", out, "-ac", "1", "-ar", "48000", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    expect(wet.map(&:abs).max).to be < 32767
+    diff = ->(from, len) { wet.slice(from,len).zip(dry.slice(from,len)).sum { |a,b| (a-b).abs }.fdiv(len) }
+    expect(diff.call(38_000, 5_000)).to be > diff.call(5_000, 5_000) * 3
+  end
+  it "synthesizes procedural sound effects offline, caches them by spec and mixes them on their cues" do
+    source = video(seconds: 2)
+    name = "e2e-synth-#{Process.pid}"
+    config_dir = File.join(RT, "prompts", name); FileUtils.mkdir_p(config_dir)
+    sounds = { "swoosh" => { "synth" => "whoosh", "duration" => 0.6, "peak" => 0.7, "seed" => 4 }, "hit" => { "synth" => "impact", "duration" => 0.5 } }
+    write = ->(s) { File.write(File.join(config_dir, "sfx.yml"), YAML.dump({ "source" => source, "out" => file("synth.mp4"), "sounds" => s,
+                                                                         "cues" => [{ "sound" => "swoosh", "at" => -0.3 }, { "sound" => "swoosh", "at" => 0.4, "rel_db" => -2 }, { "sound" => "hit", "at" => 1.2 }] })) }
+    write.(sounds)
+    service = Media::Sfx.new(name)
+    expect(service.generate(client: double("no Fal calls for synth sounds")).sort).to eq(%w[hit swoosh])
+    meta = JSON.parse(File.read(File.join(service.dir, "sounds", "swoosh.json")))
+    expect(meta["peak_at"]).to be_within(0.08).of(0.42)
+    expect(ff.summary(service.wav("swoosh"))[:duration]).to be_within(0.01).of(0.6)
+    expect(Media::Sfx.new(name).generate).to be_empty # cached
+    write.(sounds.merge("hit" => { "synth" => "impact", "duration" => 0.5, "freq" => 70 }))
+    expect(Media::Sfx.new(name).generate).to eq(%w[hit])
+    out, report = Media::Sfx.new(name).mix
+    expect(report["cues"].map { |c| c["sound"] }).to eq(%w[swoosh swoosh hit]) # the first starts before 0: its head is cut, its tail plays
+    dry = ff.run("ffmpeg", "-v", "error", "-i", source, "-ac", "1", "-ar", "48000", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    wet = ff.run("ffmpeg", "-v", "error", "-i", out, "-ac", "1", "-ar", "48000", "-f", "s16le", "-", quiet: true).unpack("s<*")
+    diff = ->(from, len) { wet.slice(from, len).zip(dry.slice(from, len)).sum { |a, b| (a - b).abs }.fdiv(len) }
+    expect(diff.call(57_600, 4_800)).to be > diff.call(4_800, 4_800) * 3
+    expect { Media::Graphics.new.synth(file("bad.wav"), { "synth" => "kazoo" }) }.to raise_error(Media::CommandError, /synth must be one of/)
+  end
+  it "encodes any source to X/Twitter upload spec through the public task" do
+    src = file("x_src.mov")
+    ff.run("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1928x1076:r=30:d=2", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+           "-c:v", "libx264", "-pix_fmt", "yuv444p", "-c:a", "pcm_s16le", "-ar", "44100", src)
+    out = file("x_out.mp4")
+    FileUtils.rm_f(out)
+    stdout, err, status = cli("media:twitter[#{src},#{out}]")
+    expect(status.exitstatus).to eq(0), err
+    res = JSON.parse(stdout[stdout.index("{")..])
+    expect(res).to include("fits_free" => true, "fits_premium" => true, "audio_copied" => false)
+    info = ff.probe(out)
+    v = info["streams"].find { |st| st["codec_type"] == "video" }
+    a = info["streams"].find { |st| st["codec_type"] == "audio" }
+    expect(v.values_at("codec_name", "profile", "pix_fmt", "width", "height", "color_space", "color_primaries", "color_transfer", "color_range"))
+      .to eq(["h264", "High", "yuv420p", 1920, 1080, "bt709", "bt709", "bt709", "tv"])
+    expect(a.values_at("codec_name", "profile", "sample_rate", "channels")).to eq(["aac", "LC", "48000", 2])
+    keys = ff.run("ffprobe", "-v", "error", "-select_streams", "v", "-skip_frame", "nokey", "-show_entries", "frame=pts_time", "-of", "csv=p=0", out, quiet: true)
+    expect(keys.split.map(&:to_f)).to eq([0.0, 1.0])
+    bytes = File.binread(out)
+    expect(bytes.index("moov")).to be < bytes.index("mdat")
+    _, err, status = cli("media:twitter[#{src},#{out}]")
+    expect(status.exitstatus).not_to eq(0)
+    expect(err).to match(/exists/)
+
+    tall = file("x_tall.mp4")
+    ff.run("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=360x640:r=120:d=1", "-c:v", "libx264", tall)
+    out2 = file("x_tall_out.mp4")
+    FileUtils.rm_f(out2)
+    res2 = ff.twitter(tall, out2)
+    expect(res2[:video]).to include(w: 360, h: 640, fps: 60.0)
+    expect(res2).not_to have_key(:audio)
+  end
+end
