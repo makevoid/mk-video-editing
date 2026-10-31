@@ -48,5 +48,11 @@ module Media
     def audio_energy(wav, window: 0.5)
       call("audio_energy.py", wav, window.to_s)
     end
+
+    # Music ducking gain envelope (mono 16-bit wav, `length` s) from a voice key wav: an exact `depth` dB dip wherever
+    # the key is above `threshold` dBFS, ramped with lookahead so the first word is already ducked. Returns the spans.
+    def duck_envelope(key, out, length:, depth: -12, threshold: -42, attack: 0.12, release: 0.6, hold: 0.25, lookahead: 0.15, bridge: 0.6)
+      call("duck_envelope.py", key, out, *[length, depth, threshold, attack, release, hold, lookahead, bridge].map(&:to_s))
+    end
   end
 end

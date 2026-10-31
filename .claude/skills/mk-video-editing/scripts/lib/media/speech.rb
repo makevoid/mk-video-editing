@@ -1,6 +1,7 @@
 require "json"
 require_relative "shell"
 require_relative "python"
+require_relative "ffmpeg"
 
 module Media
   # Dialogue audio for footage edits: cleanup of phone/camera recordings, two-pass EBU R128 loudness, the timeline mix
@@ -60,11 +61,15 @@ module Media
     # (a 0.6 s picture dissolve with a 0.15 s audio crossfade keeps the last word before it intact). clip["audio_gain_db"] and clip["audio_duck"] = [[t0, t1, db], ...]
     # (clip-local seconds) shape it. doc["sounds"]: [{source, at, gain_db, fade_in, fade_out}] (narration, SFX) on top.
     # doc["music"]: [{source, at, from, duration, gain_db, duck_db, fade_in, fade_out}] ducks under clip speech and sounds.
+    # doc["duck"]: {mode: "envelope", depth_db, threshold_db, attack, release, hold, lookahead, bridge} replaces the
+    # sidechain compressor with an exact gain envelope computed from the voice key (see duck_envelope). A sound with
+    # "duck_clips": db (narration) also ducks every overlapping clip's audio by db over its span.
     def mix(edl, out, lufs: -16, tp: -1.5)
       doc = JSON.parse(File.read(edl))
       base = File.dirname(edl)
       abs = ->(p) { File.expand_path(p, base) }
       inputs, filters, labels = [], [], []
+      narration_ducks(doc, abs)
       doc.fetch("clips").each_with_index do |c, i|
         next if c["mute"] # picture only (music/narration carry the sound)
         src = abs.(c["audio"] || c["source"])
@@ -96,12 +101,19 @@ module Media
         labels << "[s#{i}]"
         voice << "[s#{i}]"
       end
+      voice_graph = filters.dup
       music = Array(doc["music"])
       unless music.empty?
         # The sidechain key is padded with silence: sidechaincompress stops at its shorter input, which would cut a
         # music tail that runs past the last word.
-        filters << "#{voice.join}amix=inputs=#{voice.size}:normalize=0:duration=longest,asplit=2[vox][key0]"
-        filters << "[key0]apad[key]"
+        duck = doc["duck"] || {}
+        envelope_mode = duck["mode"] == "envelope"
+        if envelope_mode
+          filters << "#{voice.join}amix=inputs=#{voice.size}:normalize=0:duration=longest[vox]"
+        else
+          filters << "#{voice.join}amix=inputs=#{voice.size}:normalize=0:duration=longest,asplit=2[vox][key0]"
+          filters << "[key0]apad[key]"
+        end
         music.each_with_index do |m, i|
           inputs << abs.(m["source"])
           chain = "[#{inputs.size - 1}:a]atrim=start=#{m.fetch("from", 0)}#{m["duration"] ? ":duration=#{m["duration"]}" : ""},asetpts=PTS-STARTPTS," \
@@ -112,8 +124,15 @@ module Media
           filters << chain
         end
         filters << "#{music.each_index.map { |i| "[m#{i}]" }.join}amix=inputs=#{music.size}:normalize=0:duration=longest[mus]"
-        ratio = 10**(music.first.fetch("duck_db", -10).to_f.abs / 20.0)
-        filters << "[mus][key]sidechaincompress=threshold=0.02:ratio=#{ratio.round(2)}:attack=40:release=600[ducked]"
+        if envelope_mode
+          env = envelope(inputs.dup, voice_graph, voice, out, duck, music.map { |m| m.merge("source" => abs.(m["source"])) })
+          inputs << env
+          filters << "[#{inputs.size - 1}:a]aformat=sample_rates=48000:channel_layouts=stereo[env]"
+          filters << "[mus][env]amultiply[ducked]"
+        else
+          ratio = 10**(music.first.fetch("duck_db", -10).to_f.abs / 20.0)
+          filters << "[mus][key]sidechaincompress=threshold=0.02:ratio=#{ratio.round(2)}:attack=40:release=600[ducked]"
+        end
         filters << "[vox][ducked]amix=inputs=2:normalize=0:duration=longest[mix]"
       else
         filters << "#{labels.join}amix=inputs=#{labels.size}:normalize=0:duration=longest[mix]"
@@ -126,6 +145,38 @@ module Media
     end
 
     private
+
+    # Adds clip-local audio_duck spans to every clip under a sound with "duck_clips" (narration over live sound).
+    def narration_ducks(doc, abs)
+      Array(doc["sounds"]).each do |s|
+        next unless s["duck_clips"]
+        s0 = s["at"].to_f
+        s1 = s0 + (s["duration"] || FFmpeg.new.duration(abs.(s["source"]))).to_f
+        doc["clips"].each do |c|
+          next if c["mute"]
+          c0 = c["at"].to_f
+          c1 = c0 + (c["out"].to_f - c["in"].to_f) / c.fetch("speed", 1).to_f
+          next if s1 <= c0 || s0 >= c1
+          ramp = s.fetch("duck_ramp", 0.25).to_f
+          (c["audio_duck"] ||= []) << [(s0 - c0 - ramp).round(3), (s1 - c0 + ramp).round(3), s["duck_clips"].to_f, ramp]
+        end
+      end
+    end
+
+    # Renders the voice key (clips + sounds) and turns it into a ducking gain envelope wav that covers the music.
+    def envelope(inputs, filters, voice, out, duck, music)
+      key = out.sub(/(\.\w+)\z/, '.duckkey.wav')
+      env = out.sub(/(\.\w+)\z/, '.duckenv.wav')
+      graph = (filters + ["#{voice.join}amix=inputs=#{voice.size}:normalize=0:duration=longest[k]"]).join(";")
+      run("ffmpeg", "-y", "-v", "error", *inputs.flat_map { |p| ["-i", p] }, "-filter_complex", graph, "-map", "[k]",
+          "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", key)
+      length = music.map { |m| m["at"].to_f + (m["duration"] || FFmpeg.new.duration(m["source"])).to_f }.max + 1
+      opts = { depth: duck.fetch("depth_db", music.first.fetch("duck_db", -10)) }
+      %w[threshold_db attack release hold lookahead bridge].each { |k| opts[k.delete_suffix("_db").to_sym] = duck[k] if duck.key?(k) }
+      report = Python.new.duck_envelope(key, env, length: length, **opts)
+      File.write(out.sub(/(\.\w+)\z/, '.duck.json'), JSON.pretty_generate(report))
+      env
+    end
 
     def loudnorm_json(stderr)
       start = stderr.rindex("{") or raise CommandError, "loudnorm printed no measurement"
