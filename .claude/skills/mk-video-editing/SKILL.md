@@ -86,7 +86,7 @@ Remove words and pauses inside a select with `lib/media/cuts.rb`: `Media::Cuts.p
 
 ## 5. Audio
 
-`speech:clean[audio/raw/A.wav,audio/clean/A.wav]` (PRESET=room: rumble cut, FFT denoise, mud cut, presence, de-ess, gentle expander, leveler; `ISOLATE=1` for local Demucs vocals). Add narration with `voice:tts` when requested (`MODEL=v4` for Eleven v4). Add a music bed only when the brief asks for one: a supplied track or `music:score`, placed as EDL `music` ([finishing.md](references/finishing.md#soundtrack-music-bed)). Then run `speech:mix[edit/edl.json,audio/mix.wav]`. It mixes the clip audio with crossfades on dissolves (`audio_xfade: 0.15` keeps the last word before a 0.6 s dissolve), `audio_duck` under narration, `sounds`, and `music` with sidechain ducking, then applies two-pass loudnorm to −16 LUFS / −1.5 dBTP.
+`speech:clean[audio/raw/A.wav,audio/clean/A.wav]` (PRESET=room: rumble cut, FFT denoise, mud cut, presence, de-ess, gentle expander, leveler; `ISOLATE=1` for local Demucs vocals). Add narration with `voice:tts` when requested (`MODEL=v4` for Eleven v4). Add a music bed only when the brief asks for one: a supplied track or `music:score`, placed as EDL `music` ([finishing.md](references/finishing.md#soundtrack-music-bed)). Then run `speech:mix[edit/edl.json,audio/mix.wav]`. It mixes the clip audio with crossfades on dissolves (`audio_xfade: 0.15` keeps the last word before a 0.6 s dissolve), `audio_duck` / `duck_clips` under narration, `sounds`, and `music` ducked under all speech (`duck: {mode: "envelope"}` for an exact, look-ahead dip), then applies two-pass loudnorm to −16 LUFS / −1.5 dBTP.
 
 ## 6. Review, render, deliver
 

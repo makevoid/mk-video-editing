@@ -26,7 +26,10 @@ Debug env for medit: `MEDIT_DEBUG_DEFLICKER=1` (per-frame deflicker log), `MEDIT
 
 Top level: `width`, `height`, `fps` (default 1920×1080@30), `audio` (final mix muxed by render), `duration`,
 `clips`, `overlays`, `look` (Grade applied to everything), `fade_in`, `fade_out`. Keys not used by medit (`sounds`,
-`music`, per-clip `audio`, `audio_gain_db`, `audio_duck`) drive `speech:mix`.
+`music`, `duck`, per-clip `audio`, `audio_gain_db`, `audio_duck`) drive `speech:mix`. A sound with `duck_clips: db`
+(narration) ducks every overlapping clip's audio by `db` over its span, ramped by `duck_ramp` (0.25 s), so voice-over on
+live sound needs no hand-written `audio_duck`. `duck: {mode: "envelope", …}` ducks the music by an exact gain envelope
+([finishing.md](finishing.md#soundtrack-music-bed)).
 
 Clip: `source`, `in`, `out` (source s), `at` (timeline s), `analysis`, `track`, `stabilize` (1 = world-locked from the
 analysis path, default; **0 = off** — use for in-camera stabilized phone footage, with a `SPACE=frame` track),
@@ -71,8 +74,9 @@ clip("B main argument", "A", 17.1, 56.6, 0.6, [
 ])
 ```
 
-Place clips sequentially, subtracting each dissolve from `at`. Duck the speaker under narration with
-`audio_duck: [[t0, t1, db, ramp]]` (clip-local s).
+Place clips sequentially, subtracting each dissolve from `at`. Duck the speaker under narration with `duck_clips: -18`
+on the narration sound (or by hand with `audio_duck: [[t0, t1, db, ramp]]`, clip-local s). Start a narration line at the
+clip's `at` when the clip opens mid-speech: the ramp then begins before the cut and the first frame is already ducked.
 
 ## Removing fillers, false starts, repeats and pauses (jump cuts)
 

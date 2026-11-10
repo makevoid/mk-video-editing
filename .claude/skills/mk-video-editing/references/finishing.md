@@ -13,6 +13,15 @@ edl[:music] = [{ source: "audio/music/score.mp3", at: 0, from: 0, duration: time
 
 Bring a bed up at the start and end, where nobody is speaking, by splitting it into several entries with different `gain_db`. Ducking alone handles the speech in between.
 
+**Envelope ducking (recommended for narration-driven edits).** The default sidechain compressor reduces the bed by an amount that depends on how loud the voice is (fixed threshold, `duck_db` sets its ratio) and reacts after each onset. `duck: {mode: "envelope"}` instead renders the voice key (clip speech + `sounds`), detects voice from 10 ms RMS and multiplies the bed by a gain envelope: exactly `depth_db` down while anyone speaks, already down at the first word (`lookahead`), held over short gaps (`bridge`), and released smoothly after the last word.
+
+```ruby
+edl[:duck] = { mode: "envelope", depth_db: -12, threshold_db: -45, attack: 0.15, release: 0.7, hold: 0.3,
+               lookahead: 0.2, bridge: 0.8 }   # defaults: depth = music duck_db, -42 dBFS, 0.12, 0.6, 0.25, 0.15, 0.6
+```
+
+`speech:mix` writes `<out>.duck.json` (voice spans, ducked seconds) and keeps `<out>.duckkey.wav` / `<out>.duckenv.wav` for review. Wall-to-wall talk ducks almost continuously, which is right: set `gain_db` for the level the bed should have in the gaps and on the end card, `depth_db` for under speech (−10 to −14 keeps narration 14–18 dB above the bed). Raise `threshold_db` if room tone holds the duck down; lower `bridge` if the bed should breathe between turns.
+
 **Generated score (paid, explicit request only).** `music:score[prompt.txt,out.mp3,seconds]` uses ElevenLabs Music v2.5 through Fal and is always instrumental.
 - Ask for the final timeline length plus ~0.5 s.
 - Describe mood, tempo, instrumentation and structure ("soft piano and pads, builds at 0:40, resolves for the last 10 s, no drums under speech").

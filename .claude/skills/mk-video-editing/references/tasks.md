@@ -68,7 +68,7 @@ The full reference is in [footage-editing.md](footage-editing.md).
 | --- | --- |
 | `speech:clean[in,out.wav]` | Dialogue cleanup; `PRESET=room|light|<ffmpeg chain>`, `ISOLATE=1` (local Demucs vocals), `AMBIENCE` |
 | `speech:flow[transcript,audio,out.json]` | Fillers, hums, repeats, false starts and pauses with proposed cuts; writes `out.txt` to read |
-| `speech:mix[edl,out.wav]` | Timeline mix: clip audio, crossfades, `audio_duck`, `sounds`, ducked `music`, two-pass loudnorm (`LUFS`, `TP`) |
+| `speech:mix[edl,out.wav]` | Timeline mix: clip audio, crossfades, `audio_duck` / `duck_clips`, `sounds`, ducked `music` (sidechain or `duck.mode: envelope`), two-pass loudnorm (`LUFS`, `TP`) |
 | `speech:measure[path…]`, `speech:loudnorm[in,out.wav]` | Loudness/noise report; standalone normalization |
 | `voice:tts[text.txt,out.mp3]` | Narration via Fal ElevenLabs (paid, approved plans only); `VOICE`, `SPEED`, `STABILITY`, `STYLE`, `MODEL=v4` |
 | `audio:transcribe_local[audio,out.json,from,seconds]` | mlx-whisper on any audio range |
