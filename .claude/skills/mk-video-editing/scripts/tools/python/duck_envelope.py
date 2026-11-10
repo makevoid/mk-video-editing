@@ -55,12 +55,15 @@ def main():
     length, depth, threshold, attack, release, hold, lookahead, bridge = map(float, sys.argv[3:11])
     data, rate = read_mono(key)
     hop = int(rate * HOP)
-    frames = max(len(data) // hop, 1)
-    rms = np.sqrt(np.mean(data[: frames * hop].reshape(frames, hop) ** 2, axis=1) + 1e-12)
+    frames = max((len(data) + hop - 1) // hop, 1)
+    padded = np.pad(data, (0, frames * hop - len(data)))
+    rms = np.sqrt(np.mean(padded.reshape(frames, hop) ** 2, axis=1) + 1e-12)
     spans = voice_spans(20 * np.log10(rms) > threshold, bridge)
 
-    n = int(round(length / HOP)) + 1
-    t = np.arange(n) * HOP
+    # Process the lookahead before time zero too, so opening speech is already ducked.
+    preroll = max(0, int(np.ceil(lookahead / HOP)))
+    n = int(np.ceil(length / HOP)) + 1 + preroll
+    t = (np.arange(n) - preroll) * HOP
     target = np.zeros(n)
     for s, e in spans:
         target[(t >= s - lookahead) & (t < e + hold)] = depth
@@ -78,7 +81,8 @@ def main():
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes((np.clip(env, 0, 1) * 32767).astype(np.int16).tobytes())
-    print(json.dumps({"spans": [[round(s, 2), round(e, 2)] for s, e in spans], "ducked_s": round(float((gain_db < -1).sum() * HOP), 2),
+    ducked_s = min(length, float(((gain_db < -1) & (t >= 0) & (t < length)).sum() * HOP))
+    print(json.dumps({"spans": [[round(s, 2), round(e, 2)] for s, e in spans], "ducked_s": round(ducked_s, 2),
                       "depth_db": depth, "length_s": round(length, 3)}))
 
 

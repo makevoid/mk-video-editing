@@ -66,6 +66,7 @@ module Media
     # "duck_clips": db (narration) also ducks every overlapping clip's audio by db over its span.
     def mix(edl, out, lufs: -16, tp: -1.5)
       doc = JSON.parse(File.read(edl))
+      FileUtils.mkdir_p(File.dirname(out))
       base = File.dirname(edl)
       abs = ->(p) { File.expand_path(p, base) }
       inputs, filters, labels = [], [], []
@@ -101,8 +102,12 @@ module Media
         labels << "[s#{i}]"
         voice << "[s#{i}]"
       end
-      voice_graph = filters.dup
       music = Array(doc["music"])
+      if voice.empty? && !music.empty?
+        filters << "anullsrc=r=48000:cl=stereo:d=0.01[silence]"
+        voice << "[silence]"
+      end
+      voice_graph = filters.dup
       unless music.empty?
         # The sidechain key is padded with silence: sidechaincompress stops at its shorter input, which would cut a
         # music tail that runs past the last word.
@@ -127,7 +132,8 @@ module Media
         if envelope_mode
           env = envelope(inputs.dup, voice_graph, voice, out, duck, music.map { |m| m.merge("source" => abs.(m["source"])) })
           inputs << env
-          filters << "[#{inputs.size - 1}:a]aformat=sample_rates=48000:channel_layouts=stereo[env]"
+          # Copy control gains to each channel; normal mono upmixing attenuates them by 3 dB.
+          filters << "[#{inputs.size - 1}:a]pan=stereo|c0=c0|c1=c0[env]"
           filters << "[mus][env]amultiply[ducked]"
         else
           ratio = 10**(music.first.fetch("duck_db", -10).to_f.abs / 20.0)
@@ -137,7 +143,6 @@ module Media
       else
         filters << "#{labels.join}amix=inputs=#{labels.size}:normalize=0:duration=longest[mix]"
       end
-      FileUtils.mkdir_p(File.dirname(out))
       raw = out.sub(/(\.\w+)\z/, '.premix\1')
       args = inputs.flat_map { |p| ["-i", p] }
       run("ffmpeg", "-y", "-v", "error", *args, "-filter_complex", filters.join(";"), "-map", "[mix]", "-ar", "48000", "-c:a", "pcm_s24le", raw)

@@ -39,6 +39,68 @@ RSpec.describe "Music and narration ducking", :media do
     expect(report["spans"]).to eq([[0.5, 2.0]])
   end
 
+  it "handles voice keys shorter than one analysis window" do
+    key = silence(file("short.wav"), 0.005)
+    report = py.duck_envelope(key, file("short-env.wav"), length: 1)
+    expect(report["spans"]).to be_empty
+    expect(gain_at(file("short-env.wav"), 0.5)).to be_within(0.001).of(1)
+  end
+
+  it "uses lookahead before timeline zero when speech starts immediately" do
+    key = sine(file("onset.wav"), freq: 700, from: 0, to: 1, total: 2)
+    py.duck_envelope(key, file("onset-env.wav"), length: 2, depth: -12)
+    expect(gain_at(file("onset-env.wav"), 0)).to be_within(0.001).of(10**(-12 / 20.0))
+  end
+
+  it "creates the output directory before rendering the envelope key" do
+    key = sine(file("key.wav"), freq: 700, from: 0.5, to: 1, total: 2)
+    music = tone(file("bed.wav"), duration: 3)
+    edl = file("nested.json")
+    json(edl, { "clips" => [], "sounds" => [{ "source" => key }],
+                "music" => [{ "source" => music }], "duck" => { "mode" => "envelope" } })
+    out = file("new-output/mix.wav")
+    Media::Speech.new.mix(edl, out)
+    expect(File.file?(out)).to be(true)
+    expect(File.file?(file("new-output/mix.duck.json"))).to be(true)
+  end
+
+  it "preserves stereo bed gain outside speech and applies the exact dip during speech" do
+    key = sine(file("key.wav"), freq: 700, from: 1, to: 2, total: 2.1)
+    music = file("stereo.wav")
+    ff.run("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+           "aevalsrc=0.1*sin(2*PI*300*t)|0.05*sin(2*PI*500*t):s=48000:d=5", "-c:a", "pcm_s16le", music)
+    edl = file("exact.json")
+    json(edl, { "clips" => [], "sounds" => [{ "source" => key, "gain_db" => -45 }],
+                "music" => [{ "source" => music, "gain_db" => 0 }],
+                "duck" => { "mode" => "envelope", "threshold_db" => -75, "depth_db" => -12 } })
+    Media::Speech.new.mix(edl, file("exact.wav"))
+    premix = file("exact.premix.wav")
+    expect(window_db(premix, 0.2, 0.5)).to be_within(0.1).of(window_db(music, 0.2, 0.5))
+    expect(window_db(premix, 1.3, 1.7)).to be_within(0.1).of(window_db(music, 1.3, 1.7) - 12)
+    expect(window_db(premix, 3.5, 4.0)).to be_within(0.1).of(window_db(music, 3.5, 4.0))
+    expect(ff.duration(premix)).to be_within(0.01).of(5)
+  end
+
+  %w[sidechain envelope].each do |mode|
+    it "keeps a music-only edit at full gain with #{mode} ducking" do
+      music = file("bed.wav")
+      ff.run("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=4", "-ac", "2", music)
+      edl = file("music-only.json")
+      json(edl, { "clips" => [{ "source" => "muted.mp4", "in" => 0, "out" => 4, "at" => 0, "mute" => true }],
+                  "music" => [{ "source" => music, "gain_db" => 0, "at" => 0.5, "from" => 1, "duration" => 2 }],
+                  "duck" => { "mode" => mode } })
+      Media::Speech.new.mix(edl, file("music-only.wav"))
+      premix = file("music-only.premix.wav")
+      expect(window_db(premix, 1.0, 1.5)).to be_within(0.1).of(window_db(music, 1.0, 1.5))
+      expect(ff.duration(premix)).to be_within(0.01).of(2.5)
+      if mode == "envelope"
+        report = JSON.parse(File.read(file("music-only.duck.json")))
+        expect(report["spans"]).to be_empty
+        expect(report["ducked_s"]).to eq(0)
+      end
+    end
+  end
+
   it "ducks clip audio under narration with duck_clips and the music with an envelope in speech:mix" do
     clip = video(audio: tone(file("clip.wav"), duration: 4), seconds: 4)
     narration = silence(file("narration.wav"), 1.0)
@@ -53,5 +115,19 @@ RSpec.describe "Music and narration ducking", :media do
     expect(duck["spans"].first[0]).to be_within(0.05).of(0.0)        # the clip's own speech is part of the key
     premix = file("mix.premix.wav")
     expect(window_db(premix, 0.5, 1.2) - window_db(premix, 1.7, 2.3)).to be > 12
+  end
+
+  it "ducks sped-up clips across a cut for the narration's rendered duration, including zero-length ramps" do
+    clip = sine(file("clip.wav"), freq: 700, from: 0, to: 8, total: 8)
+    narration = silence(file("narration.wav"), 2)
+    edl = file("cut.json")
+    json(edl, { "clips" => [
+      { "source" => clip, "in" => 2, "out" => 4, "at" => 0 },
+      { "source" => clip, "in" => 2, "out" => 8, "speed" => 2, "at" => 2 }],
+      "sounds" => [{ "source" => narration, "at" => 1, "duck_clips" => -20, "duck_ramp" => 0 }] })
+    Media::Speech.new.mix(edl, file("cut.wav"))
+    premix = file("cut.premix.wav")
+    expect(window_db(premix, 0.3, 0.7) - window_db(premix, 1.1, 1.4)).to be_within(0.2).of(20)
+    expect(window_db(premix, 3.5, 3.9) - window_db(premix, 2.3, 2.7)).to be_within(0.2).of(20)
   end
 end
