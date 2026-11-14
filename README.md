@@ -154,7 +154,7 @@ The EDL schema and a worked generator example are in
 
 4K HDR frames are decoded in a system process outside the job's own memory, so parallel heavy jobs can freeze a 16 GB
 Mac. The skill runs one heavy job at a time, and every native render goes through `Media::Guard`, which stops the job
-before memory gets dangerous (`MEDIT_MAX_FOOTPRINT_MB`, default 3500; `MEDIT_MIN_FREE_PCT`, default 30). A 1080p render
+before memory gets dangerous (`MEDIT_MAX_FOOTPRINT_MB`, default 3500; `MEDIT_MIN_FREE_PCT`, default 5). A 1080p render
 from 4K sources typically peaks at 2–2.5 GB.
 
 ## Privacy

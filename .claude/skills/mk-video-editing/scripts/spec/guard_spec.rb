@@ -4,7 +4,7 @@ RSpec.describe "Native rendering memory safety", :core do
   it "refuses graphics renders, previews and synthesis before launching when system memory is low" do
     service = Media::Graphics.new
     allow(service).to receive(:build)
-    allow(Media::Guard).to receive(:free_pct).and_return(20)
+    allow(Media::Guard).to receive(:free_pct).and_return(3)
     expect(Open3).not_to receive(:popen3)
     expect { service.render("scene.json", file("out.mov"), width: 64, height: 32, fps: 24, frames: 48) }.to raise_error(Media::CommandError, /System memory only/)
     expect { service.preview("scene.json", file("preview.mp4"), from: 0, to: 2) }.to raise_error(Media::CommandError, /System memory only/)
@@ -16,7 +16,7 @@ RSpec.describe "Native rendering memory safety", :core do
     allow(service).to receive(:build)
     allow(service).to receive(:config).and_return({ "source" => file("source.mp4"), "out" => file("out.mp4"), "cues" => [] })
     allow(Media::FFmpeg).to receive(:new).and_return(double(duration: 2))
-    allow(Media::Guard).to receive(:free_pct).and_return(20)
+    allow(Media::Guard).to receive(:free_pct).and_return(3)
     expect(Open3).not_to receive(:popen3)
     expect { service.render }.to raise_error(Media::CommandError, /System memory only/)
     expect { service.clip(0, 24) }.to raise_error(Media::CommandError, /System memory only/)

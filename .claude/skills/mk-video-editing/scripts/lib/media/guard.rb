@@ -6,7 +6,7 @@ module Media
   # exhausting RAM freezes the whole system instead of slowing it down. The guard polls the child's full footprint
   # (`footprint`, which counts IOSurface/GPU memory that RSS misses) and the system's available memory, and SIGKILLs the
   # job before either crosses its limit. Limits: MEDIT_MAX_FOOTPRINT_MB (job + decoder services, default 3500),
-  # MEDIT_MIN_FREE_PCT (kernel free percentage, default 30). MEDIT_GUARD_LOG=path logs every sample (0.3 s): decoder memory can grow GBs per second.
+  # MEDIT_MIN_FREE_PCT (kernel free percentage, default 5; also the floor below which a job refuses to start). MEDIT_GUARD_LOG=path logs every sample (0.3 s): decoder memory can grow GBs per second.
   module Guard
     PAGE = (`sysctl -n hw.pagesize`.to_i.nonzero? || 16_384)
 
@@ -32,9 +32,9 @@ module Media
     end
 
     def self.run(*cmd, max_footprint_mb: Integer(ENV["MEDIT_MAX_FOOTPRINT_MB"] || 3500),
-                 min_free_pct: Integer(ENV["MEDIT_MIN_FREE_PCT"] || 30), interval: 0.3, quiet: false)
+                 min_free_pct: Integer(ENV["MEDIT_MIN_FREE_PCT"] || 5), interval: 0.3, quiet: false)
       start_free = free_pct
-      raise CommandError, "System memory only #{start_free}% free (< #{min_free_pct + 15}%); close apps before heavy jobs" if start_free < min_free_pct + 15
+      raise CommandError, "System memory only #{start_free}% free (< #{min_free_pct}%); close apps before heavy jobs" if start_free < min_free_pct
       base_decoder = decoder_mb
       warn "  $ #{cmd.map(&:to_s).join(" ")}" unless quiet
       peak, low, killed = 0.0, start_free, nil
